@@ -1,0 +1,157 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: capturehubs.capture.gateway.io
+spec:
+  group: capture.gateway.io
+  names:
+    kind: CaptureHub
+    listKind: CaptureHubList
+    plural: capturehubs
+    singular: capturehub
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.connectedSpokes
+      name: ConnectedSpokes
+      type: integer
+    - jsonPath: .status.activeCaptures
+      name: ActiveCaptures
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CaptureHub defines hub-wide capture controller configuration.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CaptureHubSpec defines the desired state of CaptureHub.
+            properties:
+              authentication:
+                description: CaptureHubAuthentication defines hub authentication settings.
+                properties:
+                  type:
+                    enum:
+                    - mTLS
+                    type: string
+                required:
+                - type
+                type: object
+              grpcAddress:
+                type: string
+              tls:
+                description: CaptureHubTLSConfig defines TLS settings for the hub
+                  gRPC server.
+                properties:
+                  certSecretRef:
+                    description: |-
+                      SecretObjectReference identifies an API object including its namespace,
+                      defaulting to Secret.
+
+                      The API object must be valid in the cluster; the Group and Kind must
+                      be registered in the cluster for this reference to be valid.
+
+                      References to objects with invalid Group and Kind are not valid, and must
+                      be rejected by the implementation, with appropriate Conditions set
+                      on the containing object.
+                    properties:
+                      group:
+                        default: ""
+                        description: |-
+                          Group is the group of the referent. For example, "gateway.networking.k8s.io".
+                          When unspecified or empty string, core API group is inferred.
+                        maxLength: 253
+                        pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      kind:
+                        default: Secret
+                        description: Kind is kind of the referent. For example "Secret".
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$
+                        type: string
+                      name:
+                        description: Name is the name of the referent.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace is the namespace of the referenced object. When unspecified, the local
+                          namespace is inferred.
+
+                          Note that when a namespace different than the local namespace is specified,
+                          a ReferenceGrant object is required in the referent namespace to allow that
+                          namespace's owner to accept the reference. See the ReferenceGrant
+                          documentation for details.
+
+                          Support: Core
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - certSecretRef
+                type: object
+            required:
+            - grpcAddress
+            type: object
+          status:
+            description: CaptureHubStatus defines the observed state of CaptureHub.
+            properties:
+              activeCaptures:
+                format: int32
+                type: integer
+              connectedSpokes:
+                format: int32
+                type: integer
+              spokes:
+                items:
+                  description: CaptureHubSpokeStatus summarizes an attached spoke
+                    cluster.
+                  properties:
+                    activeCaptures:
+                      format: int32
+                      type: integer
+                    lastHeartbeat:
+                      format: date-time
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
