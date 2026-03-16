@@ -1,0 +1,127 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Only allow one e2e run per PR at a time
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create Kind cluster
+        run: |
+          cat <<EOF | kind create cluster --name kapture-e2e --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+          EOF
+          kubectl cluster-info --context kind-kapture-e2e
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+      - name: Install Gateway API CRDs
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+          kubectl wait --for=condition=Established crds --all --timeout=60s
+
+      - name: Install traffic-harvester CRDs
+        run: |
+          kubectl apply -f config/crd/bases/
+          kubectl wait --for=condition=Established crds --all --timeout=60s
+
+      - name: Build Docker images
+        run: |
+          docker build -f Dockerfile.hub -t traffic-harvester/hub:e2e .
+          docker build -f Dockerfile.spoke -t traffic-harvester/spoke:e2e .
+          docker build -f Dockerfile.agent -t traffic-harvester/agent:e2e .
+
+      - name: Load images into Kind
+        run: |
+          kind load docker-image traffic-harvester/hub:e2e --name kapture-e2e
+          kind load docker-image traffic-harvester/spoke:e2e --name kapture-e2e
+          kind load docker-image traffic-harvester/agent:e2e --name kapture-e2e
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Deploy traffic-harvester via Helm
+        run: |
+          kubectl create namespace capture-system || true
+          helm upgrade --install traffic-harvester charts/traffic-harvester \
+            --namespace capture-system \
+            --set hub.enabled=true \
+            --set hub.image.repository=traffic-harvester/hub \
+            --set hub.image.tag=e2e \
+            --set hub.image.pullPolicy=Never \
+            --set spoke.enabled=true \
+            --set spoke.image.repository=traffic-harvester/spoke \
+            --set spoke.image.tag=e2e \
+            --set spoke.image.pullPolicy=Never \
+            --set agent.image.repository=traffic-harvester/agent \
+            --set agent.image.tag=e2e \
+            --set agent.image.pullPolicy=Never \
+            --set spoke.hub.address=traffic-harvester-hub.capture-system.svc:9443 \
+            --wait \
+            --timeout 180s
+
+      - name: Wait for controllers to be ready
+        run: |
+          kubectl -n capture-system rollout status deployment/traffic-harvester-hub --timeout=120s
+          kubectl -n capture-system rollout status deployment/traffic-harvester-spoke --timeout=120s
+          echo "Controllers ready:"
+          kubectl -n capture-system get pods
+
+      - name: Run e2e tests
+        run: |
+          go test ./test/e2e/... -v -timeout 600s -count=1
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          echo "=== Pods in all namespaces ==="
+          kubectl get pods --all-namespaces -o wide
+          echo ""
+          echo "=== Controller logs (hub) ==="
+          kubectl -n capture-system logs -l app.kubernetes.io/component=hub --tail=100 || true
+          echo ""
+          echo "=== Controller logs (spoke) ==="
+          kubectl -n capture-system logs -l app.kubernetes.io/component=spoke --tail=100 || true
+          echo ""
+          echo "=== Events ==="
+          kubectl get events --all-namespaces --sort-by=.lastTimestamp | tail -50
+          echo ""
+          echo "=== TrafficCaptures ==="
+          kubectl get trafficcaptures --all-namespaces -o yaml || true
+          echo ""
+          echo "=== CaptureStorages ==="
+          kubectl get capturestorages --all-namespaces -o yaml || true
+          echo ""
+          echo "=== CaptureHubs ==="
+          kubectl get capturehubs -o yaml || true
+          echo ""
+          echo "=== Deployments ==="
+          kubectl get deployments --all-namespaces -o wide
+
+      - name: Cleanup Kind cluster
+        if: always()
+        run: kind delete cluster --name kapture-e2e
