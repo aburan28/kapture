@@ -1,0 +1,209 @@
+suite: hub tests
+templates:
+  - hub-deployment.yaml
+  - hub-service.yaml
+  - hub-serviceaccount.yaml
+  - hub-rbac.yaml
+tests:
+  # --- Deployment ---
+  - it: should render hub deployment with defaults
+    template: hub-deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-traffic-harvester-hub
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-traffic-harvester-hub
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: hub
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "traffic-harvester/hub:dev"
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 9443
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].name
+          value: grpc
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 500m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 256Mi
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 128Mi
+
+  - it: should not render hub deployment when hub.enabled is false
+    template: hub-deployment.yaml
+    set:
+      hub.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render hub deployment with TLS secret
+    template: hub-deployment.yaml
+    set:
+      hub.tls.secretName: my-tls-secret
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].name
+          value: tls
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /etc/tls
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].readOnly
+          value: true
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: tls
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: my-tls-secret
+
+  - it: should render hub deployment with nodeSelector and tolerations
+    template: hub-deployment.yaml
+    set:
+      hub.nodeSelector:
+        disktype: ssd
+      hub.tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "hub"
+          effect: "NoSchedule"
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+      - equal:
+          path: spec.template.spec.tolerations[0].key
+          value: dedicated
+      - equal:
+          path: spec.template.spec.tolerations[0].operator
+          value: Equal
+      - equal:
+          path: spec.template.spec.tolerations[0].value
+          value: hub
+      - equal:
+          path: spec.template.spec.tolerations[0].effect
+          value: NoSchedule
+
+  # --- Service ---
+  - it: should render hub service with defaults
+    template: hub-service.yaml
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-traffic-harvester-hub
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].port
+          value: 9443
+      - equal:
+          path: spec.ports[0].targetPort
+          value: grpc
+      - equal:
+          path: spec.selector["app.kubernetes.io/name"]
+          value: traffic-harvester-hub
+      - equal:
+          path: spec.selector["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+
+  - it: should not render hub service when hub.enabled is false
+    template: hub-service.yaml
+    set:
+      hub.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- ServiceAccount ---
+  - it: should render hub serviceaccount with defaults
+    template: hub-serviceaccount.yaml
+    asserts:
+      - isKind:
+          of: ServiceAccount
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-traffic-harvester-hub
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+
+  - it: should not render hub serviceaccount when hub.serviceAccount.create is false
+    template: hub-serviceaccount.yaml
+    set:
+      hub.serviceAccount.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render hub serviceaccount with annotations
+    template: hub-serviceaccount.yaml
+    set:
+      hub.serviceAccount.annotations:
+        iam.gke.io/gcp-service-account: my-sa@project.iam.gserviceaccount.com
+    asserts:
+      - equal:
+          path: metadata.annotations["iam.gke.io/gcp-service-account"]
+          value: my-sa@project.iam.gserviceaccount.com
+
+  # --- RBAC ---
+  - it: should render hub ClusterRole and ClusterRoleBinding
+    template: hub-rbac.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ClusterRole
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-traffic-harvester-hub
+        documentIndex: 0
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-traffic-harvester-hub
+        documentIndex: 1
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+        documentIndex: 1
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-traffic-harvester-hub
+        documentIndex: 1
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+        documentIndex: 1
+      - equal:
+          path: subjects[0].name
+          value: RELEASE-NAME-traffic-harvester-hub
+        documentIndex: 1
