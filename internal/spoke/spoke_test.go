@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 )
 
 // ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ func TestBuildDeployment_AllLabelsCorrect(t *testing.T) {
 		"app.kubernetes.io/name":       "capture-agent",
 		"app.kubernetes.io/instance":   "tc1",
 		"app.kubernetes.io/component":  "capture-agent",
-		"app.kubernetes.io/managed-by": "traffic-harvester",
+		"app.kubernetes.io/managed-by": "kapture",
 	}
 
 	// Deployment labels
@@ -239,7 +239,7 @@ func TestBuildService_SelectorMatchesAgentLabels(t *testing.T) {
 		"app.kubernetes.io/name":       "capture-agent",
 		"app.kubernetes.io/instance":   "tc1",
 		"app.kubernetes.io/component":  "capture-agent",
-		"app.kubernetes.io/managed-by": "traffic-harvester",
+		"app.kubernetes.io/managed-by": "kapture",
 	}
 	for k, v := range want {
 		if svc.Spec.Selector[k] != v {

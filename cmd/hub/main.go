@@ -11,8 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
-	"github.com/traffic-harvester/traffic-harvester/internal/hub"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
+	"github.com/kapture-io/kapture/internal/hub"
 )
 
 var scheme = runtime.NewScheme()

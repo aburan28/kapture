@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/traffic-harvester/traffic-harvester/internal/agent"
-	"github.com/traffic-harvester/traffic-harvester/internal/storage"
+	"github.com/kapture-io/kapture/internal/agent"
+	"github.com/kapture-io/kapture/internal/storage"
 )
 
 func main() {

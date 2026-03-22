@@ -10,7 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 )
 
 // CaptureHubReconciler reconciles the singleton CaptureHub CR.

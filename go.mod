@@ -1,4 +1,4 @@
-module github.com/traffic-harvester/traffic-harvester
+module github.com/kapture-io/kapture
 
 go 1.25.0
 

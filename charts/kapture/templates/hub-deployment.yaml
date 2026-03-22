@@ -2,21 +2,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "traffic-harvester.fullname" . }}-hub
-  namespace: {{ include "traffic-harvester.namespace" . }}
+  name: {{ include "kapture.fullname" . }}-hub
+  namespace: {{ include "kapture.namespace" . }}
   labels:
-    {{- include "traffic-harvester.hub.labels" . | nindent 4 }}
+    {{- include "kapture.hub.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.hub.replicas }}
   selector:
     matchLabels:
-      {{- include "traffic-harvester.hub.selectorLabels" . | nindent 6 }}
+      {{- include "kapture.hub.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "traffic-harvester.hub.selectorLabels" . | nindent 8 }}
+        {{- include "kapture.hub.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "traffic-harvester.hub.serviceAccountName" . }}
+      serviceAccountName: {{ include "kapture.hub.serviceAccountName" . }}
       containers:
         - name: hub
           image: "{{ .Values.hub.image.repository }}:{{ .Values.hub.image.tag }}"

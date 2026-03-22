@@ -1,8 +1,8 @@
-TrafficHarvester has been installed.
+Kapture has been installed.
 
 {{- if .Values.hub.enabled }}
 Hub controller is deployed.
-  gRPC service: {{ include "traffic-harvester.fullname" . }}-hub.{{ include "traffic-harvester.namespace" . }}.svc:{{ .Values.hub.service.port }}
+  gRPC service: {{ include "kapture.fullname" . }}-hub.{{ include "kapture.namespace" . }}.svc:{{ .Values.hub.service.port }}
 {{- end }}
 
 {{- if .Values.spoke.enabled }}

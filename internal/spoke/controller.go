@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
-	hubv1 "github.com/traffic-harvester/traffic-harvester/proto/hub/v1"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
+	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
 const (

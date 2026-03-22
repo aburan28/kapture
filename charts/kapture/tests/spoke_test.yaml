@@ -12,7 +12,7 @@ tests:
           of: Deployment
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
       - equal:
           path: metadata.namespace
           value: NAMESPACE
@@ -21,13 +21,13 @@ tests:
           value: 1
       - equal:
           path: spec.template.spec.serviceAccountName
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
       - equal:
           path: spec.template.spec.containers[0].name
           value: spoke
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "traffic-harvester/spoke:dev"
+          value: "kapture/spoke:dev"
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: IfNotPresent
@@ -36,7 +36,7 @@ tests:
           value: AGENT_IMAGE
       - equal:
           path: spec.template.spec.containers[0].env[0].value
-          value: "traffic-harvester/agent:dev"
+          value: "kapture/agent:dev"
       - equal:
           path: spec.template.spec.containers[0].resources.limits.cpu
           value: 500m
@@ -105,7 +105,7 @@ tests:
           of: ServiceAccount
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
       - equal:
           path: metadata.namespace
           value: NAMESPACE
@@ -129,7 +129,7 @@ tests:
         documentIndex: 0
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
         documentIndex: 0
       - equal:
           path: rules[0].apiGroups[0]
@@ -164,7 +164,7 @@ tests:
         documentIndex: 1
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
         documentIndex: 1
       - equal:
           path: roleRef.kind
@@ -172,7 +172,7 @@ tests:
         documentIndex: 1
       - equal:
           path: roleRef.name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
         documentIndex: 1
       - equal:
           path: subjects[0].kind
@@ -180,5 +180,5 @@ tests:
         documentIndex: 1
       - equal:
           path: subjects[0].name
-          value: RELEASE-NAME-traffic-harvester-spoke
+          value: RELEASE-NAME-kapture-spoke
         documentIndex: 1

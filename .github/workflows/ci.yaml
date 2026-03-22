@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
       - run: helm plugin install https://github.com/helm-unittest/helm-unittest.git
-      - run: helm unittest charts/traffic-harvester
+      - run: helm unittest charts/kapture
 
   build:
     runs-on: ubuntu-latest

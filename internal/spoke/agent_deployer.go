@@ -9,11 +9,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 )
 
 const (
-	defaultCaptureAgentImage = "traffic-harvester/capture-agent:latest"
+	defaultCaptureAgentImage = "kapture/capture-agent:latest"
 	defaultReplicas          int32 = 1
 	defaultMinReplicas       int32 = 1
 	defaultMaxReplicas       int32 = 10
@@ -24,7 +24,7 @@ const (
 	labelComponent       = "app.kubernetes.io/component"
 	labelManagedBy       = "app.kubernetes.io/managed-by"
 	componentCaptureAgent = "capture-agent"
-	managedByValue       = "traffic-harvester"
+	managedByValue       = "kapture"
 )
 
 // CaptureAgentImage can be overridden at build time.

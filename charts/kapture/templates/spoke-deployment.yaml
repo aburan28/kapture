@@ -2,21 +2,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "traffic-harvester.fullname" . }}-spoke
-  namespace: {{ include "traffic-harvester.namespace" . }}
+  name: {{ include "kapture.fullname" . }}-spoke
+  namespace: {{ include "kapture.namespace" . }}
   labels:
-    {{- include "traffic-harvester.spoke.labels" . | nindent 4 }}
+    {{- include "kapture.spoke.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.spoke.replicas }}
   selector:
     matchLabels:
-      {{- include "traffic-harvester.spoke.selectorLabels" . | nindent 6 }}
+      {{- include "kapture.spoke.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "traffic-harvester.spoke.selectorLabels" . | nindent 8 }}
+        {{- include "kapture.spoke.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "traffic-harvester.spoke.serviceAccountName" . }}
+      serviceAccountName: {{ include "kapture.spoke.serviceAccountName" . }}
       containers:
         - name: spoke
           image: "{{ .Values.spoke.image.repository }}:{{ .Values.spoke.image.tag }}"

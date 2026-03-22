@@ -2,9 +2,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "traffic-harvester.fullname" . }}-hub
+  name: {{ include "kapture.fullname" . }}-hub
   labels:
-    {{- include "traffic-harvester.hub.labels" . | nindent 4 }}
+    {{- include "kapture.hub.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["capture.gateway.io"]
     resources: ["capturehubs"]
@@ -25,16 +25,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "traffic-harvester.fullname" . }}-hub
+  name: {{ include "kapture.fullname" . }}-hub
   labels:
-    {{- include "traffic-harvester.hub.labels" . | nindent 4 }}
+    {{- include "kapture.hub.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "traffic-harvester.fullname" . }}-hub
+  name: {{ include "kapture.fullname" . }}-hub
 subjects:
   - kind: ServiceAccount
-    name: {{ include "traffic-harvester.hub.serviceAccountName" . }}
-    namespace: {{ include "traffic-harvester.namespace" . }}
+    name: {{ include "kapture.hub.serviceAccountName" . }}
+    namespace: {{ include "kapture.namespace" . }}
 {{- end }}
 

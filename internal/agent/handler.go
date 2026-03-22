@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/traffic-harvester/traffic-harvester/internal/storage"
+	"github.com/kapture-io/kapture/internal/storage"
 )
 
 // CapturedHTTPRequest holds the raw data extracted from an incoming mirrored request.

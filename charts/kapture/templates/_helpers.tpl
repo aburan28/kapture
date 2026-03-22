@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "traffic-harvester.name" -}}
+{{- define "kapture.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "traffic-harvester.fullname" -}}
+{{- define "kapture.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,24 +24,24 @@ Create a default fully qualified app name.
 {{/*
 Common labels
 */}}
-{{- define "traffic-harvester.labels" -}}
-helm.sh/chart: {{ include "traffic-harvester.chart" . }}
+{{- define "kapture.labels" -}}
+helm.sh/chart: {{ include "kapture.chart" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
 Chart label
 */}}
-{{- define "traffic-harvester.chart" -}}
+{{- define "kapture.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Hub labels
 */}}
-{{- define "traffic-harvester.hub.labels" -}}
-{{ include "traffic-harvester.labels" . }}
-app.kubernetes.io/name: {{ include "traffic-harvester.name" . }}-hub
+{{- define "kapture.hub.labels" -}}
+{{ include "kapture.labels" . }}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-hub
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: hub
 {{- end }}
@@ -49,17 +49,17 @@ app.kubernetes.io/component: hub
 {{/*
 Hub selector labels
 */}}
-{{- define "traffic-harvester.hub.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "traffic-harvester.name" . }}-hub
+{{- define "kapture.hub.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-hub
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Spoke labels
 */}}
-{{- define "traffic-harvester.spoke.labels" -}}
-{{ include "traffic-harvester.labels" . }}
-app.kubernetes.io/name: {{ include "traffic-harvester.name" . }}-spoke
+{{- define "kapture.spoke.labels" -}}
+{{ include "kapture.labels" . }}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-spoke
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: spoke
 {{- end }}
@@ -67,17 +67,17 @@ app.kubernetes.io/component: spoke
 {{/*
 Spoke selector labels
 */}}
-{{- define "traffic-harvester.spoke.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "traffic-harvester.name" . }}-spoke
+{{- define "kapture.spoke.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-spoke
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Hub ServiceAccount name
 */}}
-{{- define "traffic-harvester.hub.serviceAccountName" -}}
+{{- define "kapture.hub.serviceAccountName" -}}
 {{- if .Values.hub.serviceAccount.create }}
-{{- default (printf "%s-hub" (include "traffic-harvester.fullname" .)) }}
+{{- default (printf "%s-hub" (include "kapture.fullname" .)) }}
 {{- else }}
 {{- default "default" }}
 {{- end }}
@@ -86,9 +86,9 @@ Hub ServiceAccount name
 {{/*
 Spoke ServiceAccount name
 */}}
-{{- define "traffic-harvester.spoke.serviceAccountName" -}}
+{{- define "kapture.spoke.serviceAccountName" -}}
 {{- if .Values.spoke.serviceAccount.create }}
-{{- default (printf "%s-spoke" (include "traffic-harvester.fullname" .)) }}
+{{- default (printf "%s-spoke" (include "kapture.fullname" .)) }}
 {{- else }}
 {{- default "default" }}
 {{- end }}
@@ -97,7 +97,7 @@ Spoke ServiceAccount name
 {{/*
 Namespace helper
 */}}
-{{- define "traffic-harvester.namespace" -}}
+{{- define "kapture.namespace" -}}
 {{- default .Release.Namespace .Values.namespace }}
 {{- end }}
 

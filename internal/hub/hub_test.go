@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	hubv1 "github.com/traffic-harvester/traffic-harvester/proto/hub/v1"
+	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
 func newTestServer() *Server {

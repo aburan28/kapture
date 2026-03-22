@@ -1,4 +1,4 @@
-# Kapture (Traffic Harvester)
+# Kapture
 
 A Kubernetes traffic capture controller that uses **Gateway API RequestMirror filters** for non-invasive, declarative traffic recording across single or multi-cluster environments.
 
@@ -232,12 +232,12 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 kubectl apply -f config/crd/bases/
 
 # Install the chart
-helm install traffic-harvester charts/traffic-harvester \
+helm install kapture charts/kapture \
   --namespace capture-system \
   --create-namespace \
   --set hub.enabled=true \
   --set spoke.enabled=true \
-  --set spoke.hub.address=traffic-harvester-hub.capture-system.svc:9443
+  --set spoke.hub.address=kapture-hub.capture-system.svc:9443
 ```
 
 ### Helm Values
@@ -246,18 +246,18 @@ helm install traffic-harvester charts/traffic-harvester \
 |-----|---------|-------------|
 | `installCRDs` | `true` | Install CRDs with chart |
 | `hub.enabled` | `true` | Deploy hub controller |
-| `hub.image.repository` | `traffic-harvester/hub` | Hub image |
+| `hub.image.repository` | `kapture/hub` | Hub image |
 | `hub.image.tag` | `dev` | Hub image tag |
 | `hub.replicas` | `1` | Hub replicas |
 | `hub.service.type` | `ClusterIP` | Hub service type |
 | `hub.service.port` | `9443` | Hub gRPC port |
 | `hub.tls.secretName` | `""` | TLS secret for hub |
 | `spoke.enabled` | `true` | Deploy spoke controller |
-| `spoke.image.repository` | `traffic-harvester/spoke` | Spoke image |
+| `spoke.image.repository` | `kapture/spoke` | Spoke image |
 | `spoke.image.tag` | `dev` | Spoke image tag |
 | `spoke.replicas` | `1` | Spoke replicas |
 | `spoke.hub.address` | `""` | Hub gRPC address (empty = standalone) |
-| `agent.image.repository` | `traffic-harvester/agent` | Capture agent image |
+| `agent.image.repository` | `kapture/agent` | Capture agent image |
 | `agent.image.tag` | `dev` | Agent image tag |
 
 ### Standalone Mode
@@ -265,7 +265,7 @@ helm install traffic-harvester charts/traffic-harvester \
 If you only need single-cluster capture without hub orchestration:
 
 ```bash
-helm install traffic-harvester charts/traffic-harvester \
+helm install kapture charts/kapture \
   --namespace capture-system \
   --create-namespace \
   --set hub.enabled=false \
@@ -366,7 +366,7 @@ make generate-proto
 │   └── storage/               # Pluggable storage backends
 ├── proto/hub/v1/              # gRPC protobuf definitions
 ├── config/crd/bases/          # Generated CRD YAML
-├── charts/traffic-harvester/  # Helm chart
+├── charts/kapture/  # Helm chart
 ├── test/
 │   ├── integration/           # envtest-based integration tests
 │   └── e2e/                   # End-to-end tests (Kind cluster)
@@ -427,7 +427,7 @@ Use [helm-unittest](https://github.com/helm-unittest/helm-unittest) to test char
 helm plugin install https://github.com/helm-unittest/helm-unittest.git
 
 # Run tests
-helm unittest charts/traffic-harvester
+helm unittest charts/kapture
 ```
 
 **17 tests** covering hub and spoke Deployments, Services, ServiceAccounts, RBAC, TLS, conditional rendering.
@@ -443,20 +443,20 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 kubectl apply -f config/crd/bases/
 
 # Build and load images
-docker build -f Dockerfile.hub -t traffic-harvester/hub:e2e .
-docker build -f Dockerfile.spoke -t traffic-harvester/spoke:e2e .
-docker build -f Dockerfile.agent -t traffic-harvester/agent:e2e .
-kind load docker-image traffic-harvester/hub:e2e --name kapture-e2e
-kind load docker-image traffic-harvester/spoke:e2e --name kapture-e2e
-kind load docker-image traffic-harvester/agent:e2e --name kapture-e2e
+docker build -f Dockerfile.hub -t kapture/hub:e2e .
+docker build -f Dockerfile.spoke -t kapture/spoke:e2e .
+docker build -f Dockerfile.agent -t kapture/agent:e2e .
+kind load docker-image kapture/hub:e2e --name kapture-e2e
+kind load docker-image kapture/spoke:e2e --name kapture-e2e
+kind load docker-image kapture/agent:e2e --name kapture-e2e
 
 # Deploy via Helm
-helm install traffic-harvester charts/traffic-harvester \
+helm install kapture charts/kapture \
   --namespace capture-system --create-namespace \
   --set hub.image.tag=e2e --set hub.image.pullPolicy=Never \
   --set spoke.image.tag=e2e --set spoke.image.pullPolicy=Never \
   --set agent.image.tag=e2e --set agent.image.pullPolicy=Never \
-  --set spoke.hub.address=traffic-harvester-hub.capture-system.svc:9443
+  --set spoke.hub.address=kapture-hub.capture-system.svc:9443
 
 # Run e2e tests
 go test ./test/e2e/... -v -timeout 600s
@@ -491,7 +491,7 @@ Runs on every push to `main` and all PRs:
 Runs on every push to `main` and all PRs:
 
 1. Creates a 2-node Kind cluster
-2. Installs Gateway API and traffic-harvester CRDs
+2. Installs Gateway API and kapture CRDs
 3. Builds all 3 Docker images
 4. Loads images into Kind
 5. Deploys via Helm with hub-spoke connectivity

@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	hubv1 "github.com/traffic-harvester/traffic-harvester/proto/hub/v1"
+	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
 const (

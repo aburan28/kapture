@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/traffic-harvester/traffic-harvester/internal/storage"
+	"github.com/kapture-io/kapture/internal/storage"
 )
 
 const (

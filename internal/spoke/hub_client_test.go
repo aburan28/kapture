@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	hubv1 "github.com/traffic-harvester/traffic-harvester/proto/hub/v1"
+	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 	"google.golang.org/grpc"
 )
 

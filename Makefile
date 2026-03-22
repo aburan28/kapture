@@ -14,9 +14,9 @@ test:
 	go test ./...
 
 docker-build:
-	docker build -f Dockerfile.hub -t traffic-harvester/hub:dev .
-	docker build -f Dockerfile.spoke -t traffic-harvester/spoke:dev .
-	docker build -f Dockerfile.agent -t traffic-harvester/agent:dev .
+	docker build -f Dockerfile.hub -t kapture/hub:dev .
+	docker build -f Dockerfile.spoke -t kapture/spoke:dev .
+	docker build -f Dockerfile.agent -t kapture/agent:dev .
 
 lint:
 	@echo "TODO: run golangci-lint once packages are implemented"

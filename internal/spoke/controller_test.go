@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	capturev1alpha1 "github.com/traffic-harvester/traffic-harvester/api/v1alpha1"
+	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 )
 
 func testScheme() *runtime.Scheme {
