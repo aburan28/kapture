@@ -20,7 +20,7 @@ func main() {
 		httpPort      = flag.Int("http-port", 8080, "HTTP sink listen port")
 		grpcPort      = flag.Int("grpc-port", 9090, "gRPC sink listen port")
 		healthPort    = flag.Int("health-port", 8081, "Health/metrics listen port")
-		storageType   = flag.String("storage-type", "efs", "Storage backend type (s3, gcs, efs, ebs)")
+		storageType   = flag.String("storage-type", "efs", "Storage backend type (s3, gcs, efs, ebs, plugin)")
 		storageConfig = flag.String("storage-config", "{}", "Storage backend config as JSON")
 		captureID     = flag.String("capture-id", "", "Capture ID for file naming")
 		maxBodyBytes  = flag.Int64("max-body-bytes", 1<<20, "Max request body size in bytes")
@@ -123,6 +123,12 @@ func parseStorageConfig(storageType, rawJSON string) (any, error) {
 		var cfg storage.EBSConfig
 		if err := json.Unmarshal([]byte(rawJSON), &cfg); err != nil {
 			return nil, fmt.Errorf("parse ebs config: %w", err)
+		}
+		return cfg, nil
+	case "plugin":
+		var cfg storage.PluginConfig
+		if err := json.Unmarshal([]byte(rawJSON), &cfg); err != nil {
+			return nil, fmt.Errorf("parse plugin config: %w", err)
 		}
 		return cfg, nil
 	default:

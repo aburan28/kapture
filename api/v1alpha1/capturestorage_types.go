@@ -3,19 +3,21 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 const KindCaptureStorage = "CaptureStorage"
 
-// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS
+// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS;Plugin
 type CaptureStorageType string
 
 const (
-	CaptureStorageTypeS3  CaptureStorageType = "S3"
-	CaptureStorageTypeGCS CaptureStorageType = "GCS"
-	CaptureStorageTypeEFS CaptureStorageType = "EFS"
-	CaptureStorageTypeEBS CaptureStorageType = "EBS"
+	CaptureStorageTypeS3     CaptureStorageType = "S3"
+	CaptureStorageTypeGCS    CaptureStorageType = "GCS"
+	CaptureStorageTypeEFS    CaptureStorageType = "EFS"
+	CaptureStorageTypeEBS    CaptureStorageType = "EBS"
+	CaptureStorageTypePlugin CaptureStorageType = "Plugin"
 )
 
 // +kubebuilder:validation:Enum=Ready;Error
@@ -67,6 +69,15 @@ type EBSConfig struct {
 	Filesystem *string `json:"filesystem,omitempty"`
 }
 
+// PluginConfig defines Go plugin storage settings.
+type PluginConfig struct {
+	Path string `json:"path"`
+	// +optional
+	Symbol *string `json:"symbol,omitempty"`
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
+}
+
 // CaptureStorageSpec defines the desired state of CaptureStorage.
 type CaptureStorageSpec struct {
 	Type CaptureStorageType `json:"type"`
@@ -78,6 +89,8 @@ type CaptureStorageSpec struct {
 	EFS *EFSConfig `json:"efs,omitempty"`
 	// +optional
 	EBS *EBSConfig `json:"ebs,omitempty"`
+	// +optional
+	Plugin *PluginConfig `json:"plugin,omitempty"`
 	// +optional
 	Retention *RetentionPolicy `json:"retention,omitempty"`
 }

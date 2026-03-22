@@ -136,6 +136,18 @@ spec:
                 - bucket
                 - credentialsSecretRef
                 type: object
+              plugin:
+                description: PluginConfig defines Go plugin storage settings.
+                properties:
+                  config:
+                    x-kubernetes-preserve-unknown-fields: true
+                  path:
+                    type: string
+                  symbol:
+                    type: string
+                required:
+                - path
+                type: object
               retention:
                 description: RetentionPolicy defines common capture retention settings.
                 properties:
@@ -218,6 +230,7 @@ spec:
                 - GCS
                 - EFS
                 - EBS
+                - Plugin
                 type: string
             required:
             - type

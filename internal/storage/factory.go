@@ -32,6 +32,12 @@ func NewWriterFactory(storageType string, config any) (WriterFactory, error) {
 			return nil, err
 		}
 		return NewEBSWriterFactory(cfg)
+	case "plugin":
+		cfg, err := asPluginConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		return NewPluginWriterFactory(context.Background(), cfg)
 	default:
 		return nil, fmt.Errorf("unsupported storage type %q", storageType)
 	}
@@ -90,5 +96,19 @@ func asEBSConfig(config any) (EBSConfig, error) {
 		return *cfg, nil
 	default:
 		return EBSConfig{}, fmt.Errorf("invalid config type %T for ebs", config)
+	}
+}
+
+func asPluginConfig(config any) (PluginConfig, error) {
+	switch cfg := config.(type) {
+	case PluginConfig:
+		return cfg, nil
+	case *PluginConfig:
+		if cfg == nil {
+			return PluginConfig{}, fmt.Errorf("plugin config cannot be nil")
+		}
+		return *cfg, nil
+	default:
+		return PluginConfig{}, fmt.Errorf("invalid config type %T for plugin", config)
 	}
 }

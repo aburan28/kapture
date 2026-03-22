@@ -13,18 +13,18 @@ import (
 )
 
 const (
-	defaultCaptureAgentImage = "kapture/capture-agent:latest"
+	defaultCaptureAgentImage       = "kapture/capture-agent:latest"
 	defaultReplicas          int32 = 1
 	defaultMinReplicas       int32 = 1
 	defaultMaxReplicas       int32 = 10
 	defaultTargetCPU         int32 = 70
 
-	labelApp            = "app.kubernetes.io/name"
-	labelInstance        = "app.kubernetes.io/instance"
-	labelComponent       = "app.kubernetes.io/component"
-	labelManagedBy       = "app.kubernetes.io/managed-by"
+	labelApp              = "app.kubernetes.io/name"
+	labelInstance         = "app.kubernetes.io/instance"
+	labelComponent        = "app.kubernetes.io/component"
+	labelManagedBy        = "app.kubernetes.io/managed-by"
 	componentCaptureAgent = "capture-agent"
-	managedByValue       = "kapture"
+	managedByValue        = "kapture"
 )
 
 // CaptureAgentImage can be overridden at build time.
@@ -141,12 +141,10 @@ func BuildHPA(tc *capturev1alpha1.TrafficCapture) *autoscalingv2.HorizontalPodAu
 	}
 }
 
-
-
 func agentLabels(tc *capturev1alpha1.TrafficCapture) map[string]string {
 	return map[string]string{
 		labelApp:       componentCaptureAgent,
-		labelInstance:   tc.Name,
+		labelInstance:  tc.Name,
 		labelComponent: componentCaptureAgent,
 		labelManagedBy: managedByValue,
 	}
@@ -189,6 +187,18 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 				corev1.EnvVar{Name: "EBS_VOLUME_ID", Value: storage.Spec.EBS.VolumeID},
 				corev1.EnvVar{Name: "EBS_MOUNT_PATH", Value: storage.Spec.EBS.MountPath},
 			)
+		}
+	case capturev1alpha1.CaptureStorageTypePlugin:
+		if storage.Spec.Plugin != nil {
+			envs = append(envs,
+				corev1.EnvVar{Name: "PLUGIN_PATH", Value: storage.Spec.Plugin.Path},
+			)
+			if storage.Spec.Plugin.Symbol != nil {
+				envs = append(envs, corev1.EnvVar{Name: "PLUGIN_SYMBOL", Value: *storage.Spec.Plugin.Symbol})
+			}
+			if storage.Spec.Plugin.Config != nil && len(storage.Spec.Plugin.Config.Raw) > 0 {
+				envs = append(envs, corev1.EnvVar{Name: "PLUGIN_CONFIG", Value: string(storage.Spec.Plugin.Config.Raw)})
+			}
 		}
 	}
 
