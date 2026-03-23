@@ -118,6 +118,16 @@ tests:
       - hasDocuments:
           count: 0
 
+  - it: should render spoke serviceaccount with AWS IRSA role annotation
+    template: spoke-serviceaccount.yaml
+    set:
+      spoke.irsa.enabled: true
+      spoke.irsa.roleArn: arn:aws:iam::123456789012:role/kapture-spoke
+    asserts:
+      - equal:
+          path: metadata.annotations["eks.amazonaws.com/role-arn"]
+          value: arn:aws:iam::123456789012:role/kapture-spoke
+
   # --- RBAC ---
   - it: should render spoke ClusterRole and ClusterRoleBinding with all required rules
     template: spoke-rbac.yaml

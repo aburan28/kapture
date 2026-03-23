@@ -171,6 +171,16 @@ tests:
           path: metadata.annotations["iam.gke.io/gcp-service-account"]
           value: my-sa@project.iam.gserviceaccount.com
 
+  - it: should render hub serviceaccount with AWS IRSA role annotation
+    template: hub-serviceaccount.yaml
+    set:
+      hub.irsa.enabled: true
+      hub.irsa.roleArn: arn:aws:iam::123456789012:role/kapture-hub
+    asserts:
+      - equal:
+          path: metadata.annotations["eks.amazonaws.com/role-arn"]
+          value: arn:aws:iam::123456789012:role/kapture-hub
+
   # --- RBAC ---
   - it: should render hub ClusterRole and ClusterRoleBinding
     template: hub-rbac.yaml

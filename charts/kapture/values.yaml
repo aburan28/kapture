@@ -23,6 +23,11 @@ hub:
     create: true
     # -- Annotations for the hub ServiceAccount
     annotations: {}
+  irsa:
+    # -- Enable AWS IRSA annotation injection for the hub ServiceAccount
+    enabled: false
+    # -- AWS IAM role ARN used by the hub workload (eks.amazonaws.com/role-arn)
+    roleArn: ""
   service:
     type: ClusterIP
     port: 9443
@@ -56,6 +61,11 @@ spoke:
     create: true
     # -- Annotations for the spoke ServiceAccount
     annotations: {}
+  irsa:
+    # -- Enable AWS IRSA annotation injection for the spoke ServiceAccount
+    enabled: false
+    # -- AWS IAM role ARN used by the spoke workload (eks.amazonaws.com/role-arn)
+    roleArn: ""
   hub:
     # -- gRPC address of the hub (e.g. hub-service.capture-system.svc:9443)
     address: ""
@@ -72,4 +82,3 @@ agent:
 
 # -- Namespace to deploy into (defaults to Release.Namespace)
 namespace: ""
-
