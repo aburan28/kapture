@@ -252,13 +252,31 @@ helm install kapture charts/kapture \
 | `hub.service.type` | `ClusterIP` | Hub service type |
 | `hub.service.port` | `9443` | Hub gRPC port |
 | `hub.tls.secretName` | `""` | TLS secret for hub |
+| `hub.irsa.enabled` | `false` | Add `eks.amazonaws.com/role-arn` to hub ServiceAccount |
+| `hub.irsa.roleArn` | `""` | AWS IAM role ARN for hub IRSA |
 | `spoke.enabled` | `true` | Deploy spoke controller |
 | `spoke.image.repository` | `kapture/spoke` | Spoke image |
 | `spoke.image.tag` | `dev` | Spoke image tag |
 | `spoke.replicas` | `1` | Spoke replicas |
 | `spoke.hub.address` | `""` | Hub gRPC address (empty = standalone) |
+| `spoke.irsa.enabled` | `false` | Add `eks.amazonaws.com/role-arn` to spoke ServiceAccount |
+| `spoke.irsa.roleArn` | `""` | AWS IAM role ARN for spoke IRSA |
 | `agent.image.repository` | `kapture/agent` | Capture agent image |
 | `agent.image.tag` | `dev` | Agent image tag |
+
+### AWS IRSA Example (EKS)
+
+Use IRSA to grant hub/spoke pods AWS permissions without static secrets:
+
+```bash
+helm install kapture charts/kapture \
+  --namespace capture-system \
+  --create-namespace \
+  --set hub.irsa.enabled=true \
+  --set hub.irsa.roleArn=arn:aws:iam::123456789012:role/kapture-hub \
+  --set spoke.irsa.enabled=true \
+  --set spoke.irsa.roleArn=arn:aws:iam::123456789012:role/kapture-spoke
+```
 
 ### Standalone Mode
 
