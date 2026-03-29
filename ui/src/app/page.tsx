@@ -1,19 +1,20 @@
 import Link from "next/link";
 import { StatCard } from "@/components/stat-card";
 import { PhaseBadge, HealthBadge } from "@/components/status-badge";
-import { mockCaptures, mockSpokes, mockStorages } from "@/lib/mock-data";
+import {
+  getDashboardSummary,
+  listCaptures,
+  listSpokes,
+} from "@/lib/hub-client";
 
-export default function DashboardPage() {
-  const activeCaptures = mockCaptures.filter(
-    (c) => c.status.phase === "Active"
-  );
-  const totalRequests = mockCaptures.reduce(
-    (sum, c) => sum + c.status.capturedRequests,
-    0
-  );
-  const healthySpokes = mockSpokes.filter(
-    (s) => s.healthState === "Healthy"
-  ).length;
+export default async function DashboardPage() {
+  const [summary, captures, spokes] = await Promise.all([
+    getDashboardSummary(),
+    listCaptures(),
+    listSpokes(),
+  ]);
+
+  const activeCaptures = captures.filter((c) => c.status.phase === "Active");
 
   return (
     <div className="p-8">
@@ -27,26 +28,26 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
           label="Total Captures"
-          value={mockCaptures.length}
-          sub={`${activeCaptures.length} active`}
+          value={summary.totalCaptures}
+          sub={`${summary.activeCaptures} active`}
           color="indigo"
         />
         <StatCard
           label="Captured Requests"
-          value={totalRequests.toLocaleString()}
+          value={summary.totalRequests.toLocaleString()}
           sub="Across all captures"
           color="emerald"
         />
         <StatCard
           label="Connected Spokes"
-          value={`${healthySpokes}/${mockSpokes.length}`}
-          sub={`${mockSpokes.length - healthySpokes} unhealthy`}
+          value={`${summary.healthySpokes}/${summary.totalSpokes}`}
+          sub={`${summary.totalSpokes - summary.healthySpokes} unhealthy`}
           color="blue"
         />
         <StatCard
           label="Storage Backends"
-          value={mockStorages.filter((s) => s.phase === "Ready").length}
-          sub={`${mockStorages.length} configured`}
+          value={summary.readyStorages}
+          sub={`${summary.totalStorages} configured`}
           color="amber"
         />
       </div>
@@ -146,7 +147,7 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
-          {mockSpokes.map((spoke) => (
+          {spokes.map((spoke) => (
             <div
               key={spoke.id}
               className="bg-gray-800/40 border border-gray-700/50 rounded-lg p-4"

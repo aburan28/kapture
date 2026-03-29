@@ -1,10 +1,15 @@
 import { StoragePhaseBadge } from "@/components/status-badge";
 import { StatCard } from "@/components/stat-card";
-import { mockStorages, mockCaptures } from "@/lib/mock-data";
+import { listStorages, listCaptures } from "@/lib/hub-client";
 
-export default function StoragePage() {
-  const ready = mockStorages.filter((s) => s.phase === "Ready").length;
-  const error = mockStorages.filter((s) => s.phase === "Error").length;
+export default async function StoragePage() {
+  const [storages, captures] = await Promise.all([
+    listStorages(),
+    listCaptures(),
+  ]);
+
+  const ready = storages.filter((s) => s.phase === "Ready").length;
+  const error = storages.filter((s) => s.phase === "Error").length;
 
   const typeIcons: Record<string, string> = {
     S3: "S3",
@@ -26,7 +31,7 @@ export default function StoragePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <StatCard
           label="Total Backends"
-          value={mockStorages.length}
+          value={storages.length}
           color="indigo"
         />
         <StatCard label="Ready" value={ready} color="emerald" />
@@ -34,8 +39,8 @@ export default function StoragePage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {mockStorages.map((storage) => {
-          const usedBy = mockCaptures.filter(
+        {storages.map((storage) => {
+          const usedBy = captures.filter(
             (c) => c.spec.storageRef.name === storage.name
           );
 

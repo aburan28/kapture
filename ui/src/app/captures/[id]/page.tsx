@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PhaseBadge } from "@/components/status-badge";
-import { mockCaptures, mockCapturedRequests } from "@/lib/mock-data";
+import { getCaptureStatus, getCapturedRequests } from "@/lib/hub-client";
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -26,8 +26,10 @@ export default async function CaptureDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const capture = mockCaptures.find((c) => c.name === id);
+  const capture = await getCaptureStatus(id, "kapture-system");
   if (!capture) notFound();
+
+  const recentRequests = await getCapturedRequests(id);
 
   return (
     <div className="p-8">
@@ -47,6 +49,9 @@ export default async function CaptureDetailPage({
         <p className="text-gray-400 text-sm mt-1">
           {capture.namespace} &middot;{" "}
           {capture.spec.targetRef.kind}/{capture.spec.targetRef.name}
+          {capture.status.spokeId && (
+            <span> &middot; spoke: {capture.status.spokeId}</span>
+          )}
         </p>
       </div>
 
@@ -206,7 +211,7 @@ export default async function CaptureDetailPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/50">
-              {mockCapturedRequests.map((req) => (
+              {recentRequests.map((req) => (
                 <tr
                   key={req.id}
                   className="hover:bg-gray-800/30 transition-colors"
@@ -257,19 +262,19 @@ export default async function CaptureDetailPage({
       </div>
 
       {/* Request Headers Preview */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl mt-6">
-        <div className="p-5 border-b border-gray-800">
-          <h2 className="text-lg font-semibold text-white">
-            Request Headers Preview
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Headers from the most recent captured request
-          </p>
-        </div>
-        <div className="p-5">
-          {mockCapturedRequests[0]?.headers ? (
+      {recentRequests[0]?.headers && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl mt-6">
+          <div className="p-5 border-b border-gray-800">
+            <h2 className="text-lg font-semibold text-white">
+              Request Headers Preview
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Headers from the most recent captured request
+            </p>
+          </div>
+          <div className="p-5">
             <div className="bg-gray-950 rounded-lg border border-gray-800 p-4 font-mono text-sm">
-              {Object.entries(mockCapturedRequests[0].headers).map(
+              {Object.entries(recentRequests[0].headers).map(
                 ([key, values]) => (
                   <div key={key} className="flex gap-2 py-0.5">
                     <span className="text-indigo-400">{key}:</span>
@@ -280,13 +285,9 @@ export default async function CaptureDetailPage({
                 )
               )}
             </div>
-          ) : (
-            <p className="text-sm text-gray-500">
-              No headers available
-            </p>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

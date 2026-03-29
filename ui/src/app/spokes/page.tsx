@@ -1,6 +1,6 @@
 import { HealthBadge } from "@/components/status-badge";
 import { StatCard } from "@/components/stat-card";
-import { mockSpokes, mockCaptures } from "@/lib/mock-data";
+import { listSpokes, listCaptures } from "@/lib/hub-client";
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -11,12 +11,15 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-export default function SpokesPage() {
-  const healthy = mockSpokes.filter((s) => s.healthState === "Healthy").length;
-  const degraded = mockSpokes.filter(
-    (s) => s.healthState === "Degraded"
-  ).length;
-  const disconnected = mockSpokes.filter(
+export default async function SpokesPage() {
+  const [spokes, captures] = await Promise.all([
+    listSpokes(),
+    listCaptures(),
+  ]);
+
+  const healthy = spokes.filter((s) => s.healthState === "Healthy").length;
+  const degraded = spokes.filter((s) => s.healthState === "Degraded").length;
+  const disconnected = spokes.filter(
     (s) => s.healthState === "Disconnected"
   ).length;
 
@@ -36,13 +39,13 @@ export default function SpokesPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {mockSpokes.map((spoke) => {
-          const spokeCaptures = mockCaptures.filter(
+        {spokes.map((spoke) => {
+          const spokeCaptures = captures.filter(
             (c) => c.status.spokeId === spoke.id
           );
-          const activeCaptures = spokeCaptures.filter(
+          const activeCount = spokeCaptures.filter(
             (c) => c.status.phase === "Active"
-          );
+          ).length;
           const totalRequests = spokeCaptures.reduce(
             (sum, c) => sum + c.status.capturedRequests,
             0
@@ -69,7 +72,7 @@ export default function SpokesPage() {
                     Active Captures
                   </p>
                   <p className="text-xl font-semibold text-white">
-                    {activeCaptures.length}
+                    {activeCount}
                   </p>
                 </div>
                 <div>

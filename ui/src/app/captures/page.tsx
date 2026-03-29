@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { PhaseBadge } from "@/components/status-badge";
-import { mockCaptures } from "@/lib/mock-data";
+import { listCaptures } from "@/lib/hub-client";
 
-export default function CapturesPage() {
+export default async function CapturesPage() {
+  const captures = await listCaptures();
+
+  const countByPhase = { Active: 0, Completed: 0, Pending: 0, Failed: 0 };
+  for (const c of captures) {
+    countByPhase[c.status.phase]++;
+  }
+
   return (
     <div className="p-8">
       <div className="mb-8">
@@ -15,20 +22,17 @@ export default function CapturesPage() {
       {/* Filter summary */}
       <div className="flex items-center gap-3 mb-6">
         {(["Active", "Completed", "Pending", "Failed"] as const).map(
-          (phase) => {
-            const count = mockCaptures.filter(
-              (c) => c.status.phase === phase
-            ).length;
-            return (
-              <div
-                key={phase}
-                className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm"
-              >
-                <span className="text-gray-400">{phase}: </span>
-                <span className="text-white font-medium">{count}</span>
-              </div>
-            );
-          }
+          (phase) => (
+            <div
+              key={phase}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm"
+            >
+              <span className="text-gray-400">{phase}: </span>
+              <span className="text-white font-medium">
+                {countByPhase[phase]}
+              </span>
+            </div>
+          )
         )}
       </div>
 
@@ -67,7 +71,7 @@ export default function CapturesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/50">
-              {mockCaptures.map((capture) => (
+              {captures.map((capture) => (
                 <tr
                   key={capture.name}
                   className="hover:bg-gray-800/30 transition-colors"
