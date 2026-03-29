@@ -442,7 +442,7 @@ Use [helm-unittest](https://github.com/helm-unittest/helm-unittest) to test char
 
 ```bash
 # Install plugin (one-time)
-helm plugin install https://github.com/helm-unittest/helm-unittest.git
+helm plugin install --verify=false https://github.com/helm-unittest/helm-unittest.git
 
 # Run tests
 helm unittest charts/kapture

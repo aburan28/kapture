@@ -22,6 +22,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -318,19 +319,20 @@ func TestTrafficCaptureFailsWithMissingStorage(t *testing.T) {
 func TestTrafficCapturePendingWhenStorageNotReady(t *testing.T) {
 	ns := createNamespace(t)
 
-	// Create storage but do NOT mark it ready
+	// Create storage with intentionally invalid config so the controller
+	// marks it as Error rather than auto-promoting to Ready.
 	storage := &capturev1alpha1.CaptureStorage{
 		ObjectMeta: metav1.ObjectMeta{Name: "notready-storage", Namespace: ns},
 		Spec: capturev1alpha1.CaptureStorageSpec{
 			Type: capturev1alpha1.CaptureStorageTypeEFS,
 			EFS: &capturev1alpha1.EFSConfig{
-				FileSystemID: "fs-notready",
-				MountPath:    "/mnt/capture",
+				FileSystemID: "",
+				MountPath:    "",
 			},
 		},
 	}
 	mustCreate(t, storage)
-	// Intentionally NOT marking ready
+	// Storage will be marked Error by the controller due to invalid config
 
 	route := &gwapiv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{Name: "pending-route", Namespace: ns},
@@ -379,8 +381,16 @@ func TestTrafficCapturePendingWhenStorageNotReady(t *testing.T) {
 		t.Error("expected no Deployment to be created when storage is not ready")
 	}
 
-	// Now mark storage ready and verify progression
-	markStorageReady(t, storage)
+	// Fix the storage spec so the controller will validate it as ready
+	fixStorage := &capturev1alpha1.CaptureStorage{}
+	if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(storage), fixStorage); err != nil {
+		t.Fatalf("getting storage to fix spec: %v", err)
+	}
+	fixStorage.Spec.EFS.FileSystemID = "fs-notready"
+	fixStorage.Spec.EFS.MountPath = "/mnt/capture"
+	if err = k8sClient.Update(ctx, fixStorage); err != nil {
+		t.Fatalf("fixing storage spec: %v", err)
+	}
 
 	// Should create the Deployment now
 	waitFor(t, "agent Deployment after storage ready", 60*time.Second, func() bool {
@@ -794,22 +804,31 @@ func mustCreate(t *testing.T, obj client.Object) {
 
 func markStorageReady(t *testing.T, storage *capturev1alpha1.CaptureStorage) {
 	t.Helper()
-	// Re-fetch to get latest resourceVersion
-	got := &capturev1alpha1.CaptureStorage{}
-	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(storage), got); err != nil {
-		t.Fatalf("getting storage for status update: %v", err)
-	}
-	got.Status.Phase = capturev1alpha1.CaptureStoragePhaseReady
-	got.Status.Conditions = []metav1.Condition{{
-		Type:               "Ready",
-		Status:             metav1.ConditionTrue,
-		Reason:             "ConfigValid",
-		Message:            "Storage configuration is valid",
-		LastTransitionTime: metav1.Now(),
-	}}
-	if err := k8sClient.Status().Update(ctx, got); err != nil {
+	// Retry on conflict since the storage controller may be reconciling concurrently.
+	for range 10 {
+		got := &capturev1alpha1.CaptureStorage{}
+		if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(storage), got); err != nil {
+			t.Fatalf("getting storage for status update: %v", err)
+		}
+		got.Status.Phase = capturev1alpha1.CaptureStoragePhaseReady
+		got.Status.Conditions = []metav1.Condition{{
+			Type:               "Ready",
+			Status:             metav1.ConditionTrue,
+			Reason:             "ConfigValid",
+			Message:            "Storage configuration is valid",
+			LastTransitionTime: metav1.Now(),
+		}}
+		err := k8sClient.Status().Update(ctx, got)
+		if err == nil {
+			return
+		}
+		if apierrors.IsConflict(err) {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
 		t.Fatalf("marking storage ready: %v", err)
 	}
+	t.Fatalf("marking storage ready: too many conflict retries")
 }
 
 func waitFor(t *testing.T, desc string, timeout time.Duration, cond func() bool) {

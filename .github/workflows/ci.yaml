@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - run: helm plugin install https://github.com/helm-unittest/helm-unittest.git
+      - run: helm plugin install --verify=false https://github.com/helm-unittest/helm-unittest.git
       - run: helm unittest charts/kapture
 
   build:
