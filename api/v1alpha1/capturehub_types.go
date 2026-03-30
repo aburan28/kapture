@@ -26,13 +26,15 @@ type CaptureHubAuthentication struct {
 type CaptureHubSpec struct {
 	GRPCAddress string `json:"grpcAddress"`
 	// +optional
+	DashboardAddress string `json:"dashboardAddress,omitempty"`
+	// +optional
 	TLS *CaptureHubTLSConfig `json:"tls,omitempty"`
 	// +optional
 	Authentication *CaptureHubAuthentication `json:"authentication,omitempty"`
 }
 
-// CaptureHubSpokeStatus summarizes an attached spoke cluster.
-type CaptureHubSpokeStatus struct {
+// CaptureHubAgentStatus summarizes an attached agent cluster.
+type CaptureHubAgentStatus struct {
 	Name string `json:"name"`
 	// +optional
 	LastHeartbeat *metav1.Time `json:"lastHeartbeat,omitempty"`
@@ -43,11 +45,11 @@ type CaptureHubSpokeStatus struct {
 // CaptureHubStatus defines the observed state of CaptureHub.
 type CaptureHubStatus struct {
 	// +optional
-	ConnectedSpokes int32 `json:"connectedSpokes,omitempty"`
+	ConnectedAgents int32 `json:"connectedAgents,omitempty"`
 	// +optional
 	ActiveCaptures int32 `json:"activeCaptures,omitempty"`
 	// +optional
-	Spokes []CaptureHubSpokeStatus `json:"spokes,omitempty"`
+	Agents []CaptureHubAgentStatus `json:"agents,omitempty"`
 }
 
 // CaptureHub defines hub-wide capture controller configuration.
@@ -55,7 +57,7 @@ type CaptureHubStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="ConnectedSpokes",type=integer,JSONPath=`.status.connectedSpokes`
+// +kubebuilder:printcolumn:name="ConnectedAgents",type=integer,JSONPath=`.status.connectedAgents`
 // +kubebuilder:printcolumn:name="ActiveCaptures",type=integer,JSONPath=`.status.activeCaptures`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +genclient
