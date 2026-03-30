@@ -39,6 +39,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&CaptureStorageList{},
 		&CaptureHub{},
 		&CaptureHubList{},
+		&CapturePlugin{},
+		&CapturePluginList{},
 	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
