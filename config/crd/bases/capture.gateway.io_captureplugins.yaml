@@ -1,0 +1,336 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: captureplugins.capture.gateway.io
+spec:
+  group: capture.gateway.io
+  names:
+    kind: CapturePlugin
+    listKind: CapturePluginList
+    plural: captureplugins
+    singular: captureplugin
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .spec.container.image
+      name: Image
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CapturePlugin defines a reusable, user-provided capture tool.
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CapturePluginSpec defines the desired state of CapturePlugin.
+            properties:
+              mode:
+                description: Mode controls how the plugin captures traffic.
+                enum:
+                - Mirror
+                - Standalone
+                type: string
+              container:
+                description: Container defines the user-provided capture container.
+                properties:
+                  image:
+                    type: string
+                  command:
+                    items:
+                      type: string
+                    type: array
+                  args:
+                    items:
+                      type: string
+                    type: array
+                  env:
+                    items:
+                      description: EnvVar represents an environment variable.
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        valueFrom:
+                          description: EnvVarSource represents a source for the value of an EnvVar.
+                          properties:
+                            configMapKeyRef:
+                              description: Selects a key of a ConfigMap.
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                                optional:
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                            fieldRef:
+                              description: Selects a field of the pod.
+                              properties:
+                                apiVersion:
+                                  type: string
+                                fieldPath:
+                                  type: string
+                              required:
+                              - fieldPath
+                              type: object
+                            secretKeyRef:
+                              description: Selects a key of a secret.
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                                optional:
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                          type: object
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  resources:
+                    description: ResourceRequirements describes the compute resources.
+                    properties:
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?[0-9]+))?$
+                          x-kubernetes-int-or-string: true
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?[0-9]+))?$
+                          x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  securityContext:
+                    description: SecurityContext for the plugin container.
+                    properties:
+                      privileged:
+                        type: boolean
+                      runAsUser:
+                        format: int64
+                        type: integer
+                      runAsGroup:
+                        format: int64
+                        type: integer
+                      runAsNonRoot:
+                        type: boolean
+                      readOnlyRootFilesystem:
+                        type: boolean
+                      capabilities:
+                        description: Add or drop POSIX capabilities.
+                        properties:
+                          add:
+                            items:
+                              type: string
+                            type: array
+                          drop:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                    type: object
+                required:
+                - image
+                type: object
+              ports:
+                description: Ports the plugin container exposes (required for Mirror mode).
+                items:
+                  properties:
+                    name:
+                      type: string
+                    containerPort:
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                    protocol:
+                      default: TCP
+                      type: string
+                  required:
+                  - name
+                  - containerPort
+                  type: object
+                type: array
+              output:
+                description: Output defines how the plugin emits captured data.
+                properties:
+                  type:
+                    default: volume
+                    enum:
+                    - volume
+                    - stdout
+                    type: string
+                  path:
+                    description: Path where the plugin writes output files.
+                    type: string
+                  format:
+                    default: jsonl
+                    enum:
+                    - jsonl
+                    - pcap
+                    type: string
+                required:
+                - type
+                - format
+                type: object
+              volumes:
+                description: Additional volumes the plugin needs.
+                items:
+                  properties:
+                    name:
+                      type: string
+                    emptyDir:
+                      properties:
+                        medium:
+                          type: string
+                        sizeLimit:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?[0-9]+))?$
+                          x-kubernetes-int-or-string: true
+                      type: object
+                    hostPath:
+                      properties:
+                        path:
+                          type: string
+                        type:
+                          type: string
+                      required:
+                      - path
+                      type: object
+                    configMap:
+                      properties:
+                        name:
+                          type: string
+                        items:
+                          items:
+                            properties:
+                              key:
+                                type: string
+                              path:
+                                type: string
+                            required:
+                            - key
+                            - path
+                            type: object
+                          type: array
+                        optional:
+                          type: boolean
+                      type: object
+                    secret:
+                      properties:
+                        secretName:
+                          type: string
+                        items:
+                          items:
+                            properties:
+                              key:
+                                type: string
+                              path:
+                                type: string
+                            required:
+                            - key
+                            - path
+                            type: object
+                          type: array
+                        optional:
+                          type: boolean
+                      type: object
+                    sizeLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?[0-9]+))?$
+                      x-kubernetes-int-or-string: true
+                  required:
+                  - name
+                  type: object
+                type: array
+            required:
+            - mode
+            - container
+            - output
+            type: object
+          status:
+            description: CapturePluginStatus defines the observed state of CapturePlugin.
+            properties:
+              phase:
+                enum:
+                - Ready
+                - Error
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current state.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

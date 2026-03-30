@@ -23,6 +23,11 @@ type CaptureStorageReference struct {
 	Name gwapiv1.ObjectName `json:"name"`
 }
 
+// CapturePluginReference references a CapturePlugin in the same namespace.
+type CapturePluginReference struct {
+	Name gwapiv1.ObjectName `json:"name"`
+}
+
 // HeaderMatch selects traffic by an exact header name/value pair.
 type HeaderMatch struct {
 	Name  string `json:"name"`
@@ -80,6 +85,10 @@ type TrafficCaptureSpec struct {
 	Filters *CaptureFilters `json:"filters,omitempty"`
 	// +optional
 	Agent *AgentScalingSpec `json:"agent,omitempty"`
+	// PluginRef references a CapturePlugin that replaces the built-in capture agent.
+	// When set, the plugin container is deployed instead of the default capture-agent.
+	// +optional
+	PluginRef *CapturePluginReference `json:"pluginRef,omitempty"`
 }
 
 // CaptureAgentStatus summarizes the deployed capture agents.

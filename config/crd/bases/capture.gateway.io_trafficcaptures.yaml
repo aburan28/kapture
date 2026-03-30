@@ -73,6 +73,18 @@ spec:
                     minimum: 1
                     type: integer
                 type: object
+              pluginRef:
+                description: PluginRef references a CapturePlugin that replaces the
+                  built-in capture agent.
+                properties:
+                  name:
+                    description: Name is the name of the CapturePlugin.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               capture:
                 description: CaptureSettings controls how mirrored traffic is recorded.
                 properties:
