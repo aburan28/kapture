@@ -52,13 +52,13 @@ jobs:
       - name: Build Docker images
         run: |
           docker build -f Dockerfile.hub -t kapture/hub:e2e .
-          docker build -f Dockerfile.spoke -t kapture/spoke:e2e .
+          docker build -f Dockerfile.agents -t kapture/agents:e2e .
           docker build -f Dockerfile.agent -t kapture/agent:e2e .
 
       - name: Load images into Kind
         run: |
           kind load docker-image kapture/hub:e2e --name kapture-e2e
-          kind load docker-image kapture/spoke:e2e --name kapture-e2e
+          kind load docker-image kapture/agents:e2e --name kapture-e2e
           kind load docker-image kapture/agent:e2e --name kapture-e2e
 
       - name: Install Helm
@@ -73,21 +73,21 @@ jobs:
             --set hub.image.repository=kapture/hub \
             --set hub.image.tag=e2e \
             --set hub.image.pullPolicy=Never \
-            --set spoke.enabled=true \
-            --set spoke.image.repository=kapture/spoke \
-            --set spoke.image.tag=e2e \
-            --set spoke.image.pullPolicy=Never \
+            --set agents.enabled=true \
+            --set agents.image.repository=kapture/agents \
+            --set agents.image.tag=e2e \
+            --set agents.image.pullPolicy=Never \
             --set agent.image.repository=kapture/agent \
             --set agent.image.tag=e2e \
             --set agent.image.pullPolicy=Never \
-            --set spoke.hub.address=kapture-hub.capture-system.svc:9443 \
+            --set agents.hub.address=kapture-hub.capture-system.svc:9443 \
             --wait \
             --timeout 180s
 
       - name: Wait for controllers to be ready
         run: |
           kubectl -n capture-system rollout status deployment/kapture-hub --timeout=120s
-          kubectl -n capture-system rollout status deployment/kapture-spoke --timeout=120s
+          kubectl -n capture-system rollout status deployment/kapture-agents --timeout=120s
           echo "Controllers ready:"
           kubectl -n capture-system get pods
 
@@ -104,8 +104,8 @@ jobs:
           echo "=== Controller logs (hub) ==="
           kubectl -n capture-system logs -l app.kubernetes.io/component=hub --tail=100 || true
           echo ""
-          echo "=== Controller logs (spoke) ==="
-          kubectl -n capture-system logs -l app.kubernetes.io/component=spoke --tail=100 || true
+          echo "=== Controller logs (agents) ==="
+          kubectl -n capture-system logs -l app.kubernetes.io/component=agents --tail=100 || true
           echo ""
           echo "=== Events ==="
           kubectl get events --all-namespaces --sort-by=.lastTimestamp | tail -50

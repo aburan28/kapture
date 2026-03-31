@@ -15,7 +15,7 @@ import (
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
-	"github.com/kapture-io/kapture/internal/spoke"
+	"github.com/kapture-io/kapture/internal/agents"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
@@ -32,16 +32,16 @@ func main() {
 		metricsAddr     string
 		healthProbeAddr string
 		hubAddress      string
-		spokeName       string
+		agentName       string
 		clusterID       string
 		leaderElect     bool
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metrics endpoint binds to.")
 	flag.StringVar(&healthProbeAddr, "health-probe-addr", ":8081", "The address the health probe endpoint binds to.")
-	flag.StringVar(&hubAddress, "hub-address", "", "The gRPC address of the hub (optional, spoke works standalone if empty).")
-	flag.StringVar(&spokeName, "spoke-name", "", "The name of this spoke cluster (defaults to hostname).")
-	flag.StringVar(&clusterID, "cluster-id", "", "The cluster identifier for this spoke.")
+	flag.StringVar(&hubAddress, "hub-address", "", "The gRPC address of the hub (optional, agents controller works standalone if empty).")
+	flag.StringVar(&agentName, "agent-name", "", "The name of this agent cluster (defaults to hostname).")
+	flag.StringVar(&clusterID, "cluster-id", "", "The cluster identifier for this agent.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -54,7 +54,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: healthProbeAddr,
 		LeaderElection:         leaderElect,
-		LeaderElectionID:       "spoke.capture.gateway.io",
+		LeaderElectionID:       "agents.capture.gateway.io",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -62,19 +62,19 @@ func main() {
 	}
 
 	// Set up hub client (optional)
-	var hubClient *spoke.HubClient
+	var hubClient *agents.HubClient
 	if hubAddress != "" {
-		if spokeName == "" {
+		if agentName == "" {
 			hostname, _ := os.Hostname()
-			spokeName = hostname
+			agentName = hostname
 		}
 		if clusterID == "" {
-			clusterID = spokeName
+			clusterID = agentName
 		}
 
-		hubClient = spoke.NewHubClient(spoke.HubClientConfig{
+		hubClient = agents.NewHubClient(agents.HubClientConfig{
 			HubAddress: hubAddress,
-			SpokeName:  spokeName,
+			AgentName:  agentName,
 			ClusterID:  clusterID,
 			Logger:     setupLog,
 		})
@@ -114,7 +114,7 @@ func main() {
 		setupLog.Info("no hub address configured, running in standalone mode")
 	}
 
-	if err := (&spoke.TrafficCaptureReconciler{
+	if err := (&agents.TrafficCaptureReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		HubClient: hubClient,
@@ -123,7 +123,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&spoke.CaptureStorageReconciler{
+	if err := (&agents.CaptureStorageReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -140,9 +140,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting spoke controller manager",
+	setupLog.Info("starting agents controller manager",
 		"hub-address", hubAddress,
-		"spoke-name", spokeName,
+		"agent-name", agentName,
 	)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")

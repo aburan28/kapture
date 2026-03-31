@@ -3,14 +3,15 @@ Kapture has been installed.
 {{- if .Values.hub.enabled }}
 Hub controller is deployed.
   gRPC service: {{ include "kapture.fullname" . }}-hub.{{ include "kapture.namespace" . }}.svc:{{ .Values.hub.service.port }}
+  Dashboard: http://{{ include "kapture.fullname" . }}-hub.{{ include "kapture.namespace" . }}.svc:{{ .Values.hub.service.dashboardPort }}
 {{- end }}
 
-{{- if .Values.spoke.enabled }}
-Spoke controller is deployed.
-{{- if .Values.spoke.hub.address }}
-  Connected to hub at: {{ .Values.spoke.hub.address }}
+{{- if .Values.agents.enabled }}
+Agents controller is deployed.
+{{- if .Values.agents.hub.address }}
+  Connected to hub at: {{ .Values.agents.hub.address }}
 {{- else }}
-  WARNING: No hub address configured. Set spoke.hub.address to connect to a hub.
+  WARNING: No hub address configured. Set agents.hub.address to connect to a hub.
 {{- end }}
 {{- end }}
 
@@ -48,4 +49,3 @@ To create a traffic capture:
          includeHeaders: true
          includeBody: true
      EOF
-

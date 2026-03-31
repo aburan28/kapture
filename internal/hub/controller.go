@@ -15,7 +15,7 @@ import (
 
 // CaptureHubReconciler reconciles the singleton CaptureHub CR.
 // It starts/stops the gRPC server based on the CaptureHub spec and
-// updates the CR status with aggregated spoke information.
+// updates the CR status with aggregated agent information.
 type CaptureHubReconciler struct {
 	client.Client
 	Log logr.Logger
@@ -33,7 +33,7 @@ func (r *CaptureHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // Reconcile handles CaptureHub CR changes: starts/reconfigures the gRPC server
-// and updates the status with aggregated spoke data.
+// and updates the status with aggregated agent data.
 func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("capturehub", req.Name)
 
@@ -54,7 +54,7 @@ func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Update CaptureHub status with aggregated spoke information.
+	// Update CaptureHub status with aggregated agent information.
 	if err := r.updateStatus(ctx, &hub); err != nil {
 		log.Error(err, "failed to update CaptureHub status")
 		return ctrl.Result{}, err
@@ -68,27 +68,31 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	address := hub.Spec.GRPCAddress
-	if address == "" {
-		address = ":9443"
+	grpcAddress := hub.Spec.GRPCAddress
+	if grpcAddress == "" {
+		grpcAddress = ":9443"
+	}
+	dashboardAddress := hub.Spec.DashboardAddress
+	if dashboardAddress == "" {
+		dashboardAddress = ":8082"
 	}
 
-	// If the server is already running on the right address, nothing to do.
-	if r.server != nil && r.server.address == address {
+	// If the server is already running on the right addresses, nothing to do.
+	if r.server != nil && r.server.grpcAddress == grpcAddress && r.server.DashboardAddress() == dashboardAddress {
 		return nil
 	}
 
-	// Stop existing server if address changed.
+	// Stop existing server if the address changed.
 	if r.server != nil {
-		r.Log.Info("Stopping existing gRPC server for reconfiguration")
+		r.Log.Info("Stopping existing hub servers for reconfiguration")
 		r.cancel()
 		r.server.Stop()
 		r.server = nil
 		r.cancel = nil
 	}
 
-	r.Log.Info("Starting gRPC server", "address", address)
-	r.server = NewServer(address)
+	r.Log.Info("Starting hub servers", "grpcAddress", grpcAddress, "dashboardAddress", dashboardAddress)
+	r.server = NewServer(grpcAddress, dashboardAddress)
 
 	serverCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
@@ -115,7 +119,7 @@ func (r *CaptureHubReconciler) stopServer() {
 	}
 }
 
-// updateStatus writes aggregated spoke data to the CaptureHub CR status.
+// updateStatus writes aggregated agent data to the CaptureHub CR status.
 func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1alpha1.CaptureHub) error {
 	r.mu.Lock()
 	srv := r.server
@@ -125,14 +129,14 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 		return fmt.Errorf("gRPC server not running")
 	}
 
-	hub.Status.ConnectedSpokes = srv.ConnectedSpokeCount()
+	hub.Status.ConnectedAgents = srv.ConnectedAgentCount()
 	hub.Status.ActiveCaptures = srv.ActiveCaptureCount()
 
-	spokeSnapshots := srv.SpokeStatuses()
-	hub.Status.Spokes = make([]capturev1alpha1.CaptureHubSpokeStatus, len(spokeSnapshots))
-	for i, ss := range spokeSnapshots {
+	agentSnapshots := srv.AgentStatuses()
+	hub.Status.Agents = make([]capturev1alpha1.CaptureHubAgentStatus, len(agentSnapshots))
+	for i, ss := range agentSnapshots {
 		t := metav1.NewTime(ss.LastHeartbeat)
-		hub.Status.Spokes[i] = capturev1alpha1.CaptureHubSpokeStatus{
+		hub.Status.Agents[i] = capturev1alpha1.CaptureHubAgentStatus{
 			Name:           ss.Name,
 			LastHeartbeat:  &t,
 			ActiveCaptures: ss.ActiveCaptures,
@@ -148,4 +152,3 @@ func (r *CaptureHubReconciler) GetServer() *Server {
 	defer r.mu.Unlock()
 	return r.server
 }
-

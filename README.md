@@ -9,7 +9,7 @@ Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes
 ### Key Features
 
 - **Non-invasive capture** via Gateway API RequestMirror -- no sidecars, no code changes
-- **Hub-spoke architecture** for multi-cluster orchestration
+- **Hub-agents architecture** for multi-cluster orchestration
 - **Pluggable storage** -- S3, GCS, EFS, EBS backends
 - **Auto-scaling** capture agents via HPA
 - **Declarative** -- everything is a Kubernetes Custom Resource
@@ -31,10 +31,10 @@ Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes
               ┌───────────────────┼───────────────────────┐
               │                   │                        │
     ┌─────────▼─────────┐   ┌────▼──────────────┐   ┌────▼──────────────┐
-    │   Spoke Cluster A  │   │  Spoke Cluster B   │   │  Spoke Cluster C   │
+    │   Agent Cluster A  │   │  Agent Cluster B   │   │  Agent Cluster C   │
     │                    │   │                    │   │                    │
     │ ┌────────────────┐ │   │ ┌────────────────┐ │   │ ┌────────────────┐ │
-    │ │Spoke Controller│ │   │ │Spoke Controller│ │   │ │Spoke Controller│ │
+    │ │Agents Controller│ │   │ │Agents Controller│ │   │ │Agents Controller│ │
     │ └───────┬────────┘ │   │ └───────┬────────┘ │   │ └───────┬────────┘ │
     │         │          │   │         │          │   │         │          │
     │    Reconciles:     │   │    Reconciles:     │   │    Reconciles:     │
@@ -58,7 +58,7 @@ Client → Gateway → HTTPRoute ──┬──→ Backend Service (original)
 ```
 
 1. A `TrafficCapture` CR is created referencing an `HTTPRoute` (or `GRPCRoute`) and a `CaptureStorage`
-2. The spoke controller creates a capture agent `Deployment`, `Service`, and `HPA`
+2. The agents controller creates a capture agent `Deployment`, `Service`, and `HPA`
 3. A `RequestMirror` filter is injected into the target route
 4. Mirrored traffic flows to capture agents, which batch and write to storage
 5. On deletion, the finalizer removes the mirror filter and owned resources are garbage collected
@@ -69,12 +69,12 @@ Client → Gateway → HTTPRoute ──┬──→ Backend Service (original)
 
 Central orchestration point for multi-cluster deployments. Manages the `CaptureHub` CR and runs a gRPC server that:
 
-- Accepts spoke registrations
-- Monitors spoke health via heartbeats (30s interval, 90s timeout)
-- Aggregates capture status across all spokes
-- Provides query APIs (ListCaptures, GetCaptureStatus, ListSpokes)
+- Accepts agents registrations
+- Monitors agents health via heartbeats (30s interval, 90s timeout)
+- Aggregates capture status across all agents
+- Provides query APIs (ListCaptures, GetCaptureStatus, ListAgents)
 
-### Spoke Controller (`cmd/spoke`)
+### Agents Controller (`cmd/agents`)
 
 Per-cluster controller that reconciles `TrafficCapture` CRs. For each capture it:
 
@@ -85,7 +85,7 @@ Per-cluster controller that reconciles `TrafficCapture` CRs. For each capture it
 - Injects a `RequestMirror` filter into the target `HTTPRoute` or `GRPCRoute`
 - Reports status to the hub (best-effort, non-blocking)
 
-The spoke can run standalone (without a hub) or connected to a hub for multi-cluster visibility.
+The agents can run standalone (without a hub) or connected to a hub for multi-cluster visibility.
 
 ### Capture Agent (`cmd/capture-agent`)
 
@@ -185,7 +185,7 @@ spec:
     type: mTLS
 ```
 
-**Status fields:** `connectedSpokes`, `activeCaptures`, `spokes[]` (name, lastHeartbeat, activeCaptures)
+**Status fields:** `connectedAgents`, `activeCaptures`, `agents[]` (name, lastHeartbeat, activeCaptures)
 
 ## Captured Data Format
 
@@ -236,8 +236,8 @@ helm install kapture charts/kapture \
   --namespace capture-system \
   --create-namespace \
   --set hub.enabled=true \
-  --set spoke.enabled=true \
-  --set spoke.hub.address=kapture-hub.capture-system.svc:9443
+  --set agents.enabled=true \
+  --set agents.hub.address=kapture-hub.capture-system.svc:9443
 ```
 
 ### Helm Values
@@ -252,11 +252,11 @@ helm install kapture charts/kapture \
 | `hub.service.type` | `ClusterIP` | Hub service type |
 | `hub.service.port` | `9443` | Hub gRPC port |
 | `hub.tls.secretName` | `""` | TLS secret for hub |
-| `spoke.enabled` | `true` | Deploy spoke controller |
-| `spoke.image.repository` | `kapture/spoke` | Spoke image |
-| `spoke.image.tag` | `dev` | Spoke image tag |
-| `spoke.replicas` | `1` | Spoke replicas |
-| `spoke.hub.address` | `""` | Hub gRPC address (empty = standalone) |
+| `agents.enabled` | `true` | Deploy agents controller |
+| `agents.image.repository` | `kapture/agents` | Agents image |
+| `agents.image.tag` | `dev` | Agents image tag |
+| `agents.replicas` | `1` | Agents replicas |
+| `agents.hub.address` | `""` | Hub gRPC address (empty = standalone) |
 | `agent.image.repository` | `kapture/agent` | Capture agent image |
 | `agent.image.tag` | `dev` | Agent image tag |
 
@@ -269,7 +269,7 @@ helm install kapture charts/kapture \
   --namespace capture-system \
   --create-namespace \
   --set hub.enabled=false \
-  --set spoke.enabled=true
+  --set agents.enabled=true
 ```
 
 ## Quick Start
@@ -357,11 +357,11 @@ make generate-proto
 │   └── zz_generated.deepcopy.go
 ├── cmd/
 │   ├── hub/                   # Hub controller binary
-│   ├── spoke/                 # Spoke controller binary
+│   ├── agents/                 # Agents controller binary
 │   └── capture-agent/         # Capture agent binary
 ├── internal/
 │   ├── hub/                   # Hub reconciler + gRPC server
-│   ├── spoke/                 # Spoke reconciler + mirror logic
+│   ├── agents/                 # Agents reconciler + mirror logic
 │   ├── agent/                 # Capture handler + buffered writer
 │   └── storage/               # Pluggable storage backends
 ├── proto/hub/v1/              # gRPC protobuf definitions
@@ -373,7 +373,7 @@ make generate-proto
 ├── .github/workflows/
 │   ├── ci.yaml                # Unit/integration/lint/helm CI
 │   └── e2e.yaml               # E2E tests on Kind cluster
-├── Dockerfile.{hub,spoke,agent}
+├── Dockerfile.{hub,agents,agent}
 └── Makefile
 ```
 
@@ -395,12 +395,12 @@ go test ./internal/... -v -race
 |---------|-------|---------------|
 | `internal/storage` | 55 | Buffered writer, JSONL marshaling, gzip compression, S3/GCS/EFS/EBS writers, factory dispatch |
 | `internal/agent` | 30 | CaptureHandler (body truncation, metrics), BufferedWriter (batching, flush), HTTP/health/metrics handlers |
-| `internal/spoke` | 66 | BuildDeployment/Service/HPA, env var generation, mirror filter build/detect/remove, annotations |
-| `internal/hub` | 36 | All gRPC RPCs, spoke registry, heartbeat tracking, timeout detection, status aggregation |
+| `internal/agents` | 66 | BuildDeployment/Service/HPA, env var generation, mirror filter build/detect/remove, annotations |
+| `internal/hub` | 36 | All gRPC RPCs, agents registry, heartbeat tracking, timeout detection, status aggregation |
 
 ### Integration Tests
 
-Use [envtest](https://book.kubebuilder.io/reference/envtest) to run a real Kubernetes API server with the spoke controller.
+Use [envtest](https://book.kubebuilder.io/reference/envtest) to run a real Kubernetes API server with the agents controller.
 
 ```bash
 # Install envtest binaries (one-time)
@@ -430,7 +430,7 @@ helm plugin install https://github.com/helm-unittest/helm-unittest.git
 helm unittest charts/kapture
 ```
 
-**17 tests** covering hub and spoke Deployments, Services, ServiceAccounts, RBAC, TLS, conditional rendering.
+**17 tests** covering hub and agents Deployments, Services, ServiceAccounts, RBAC, TLS, conditional rendering.
 
 ### End-to-End Tests
 
@@ -444,19 +444,19 @@ kubectl apply -f config/crd/bases/
 
 # Build and load images
 docker build -f Dockerfile.hub -t kapture/hub:e2e .
-docker build -f Dockerfile.spoke -t kapture/spoke:e2e .
+docker build -f Dockerfile.agents -t kapture/agents:e2e .
 docker build -f Dockerfile.agent -t kapture/agent:e2e .
 kind load docker-image kapture/hub:e2e --name kapture-e2e
-kind load docker-image kapture/spoke:e2e --name kapture-e2e
+kind load docker-image kapture/agents:e2e --name kapture-e2e
 kind load docker-image kapture/agent:e2e --name kapture-e2e
 
 # Deploy via Helm
 helm install kapture charts/kapture \
   --namespace capture-system --create-namespace \
   --set hub.image.tag=e2e --set hub.image.pullPolicy=Never \
-  --set spoke.image.tag=e2e --set spoke.image.pullPolicy=Never \
+  --set agents.image.tag=e2e --set agents.image.pullPolicy=Never \
   --set agent.image.tag=e2e --set agent.image.pullPolicy=Never \
-  --set spoke.hub.address=kapture-hub.capture-system.svc:9443
+  --set agents.hub.address=kapture-hub.capture-system.svc:9443
 
 # Run e2e tests
 go test ./test/e2e/... -v -timeout 600s
@@ -494,26 +494,26 @@ Runs on every push to `main` and all PRs:
 2. Installs Gateway API and kapture CRDs
 3. Builds all 3 Docker images
 4. Loads images into Kind
-5. Deploys via Helm with hub-spoke connectivity
+5. Deploys via Helm with hub-agents connectivity
 6. Runs the full e2e test suite
 7. Collects controller logs, events, and CR dumps on failure
 
 Includes concurrency control (cancels previous runs on same PR) and a 30-minute timeout.
 
-## Hub-Spoke gRPC Protocol
+## Hub-Agents gRPC Protocol
 
-The hub and spoke communicate via gRPC (defined in `proto/hub/v1/hub.proto`):
+The hub and agents communicate via gRPC (defined in `proto/hub/v1/hub.proto`):
 
 | RPC | Direction | Description |
 |-----|-----------|-------------|
-| `RegisterSpoke` | Spoke -> Hub | Register with cluster info, receive heartbeat interval |
-| `Heartbeat` | Spoke -> Hub | Periodic health signal with capture summaries |
-| `DeregisterSpoke` | Spoke -> Hub | Graceful shutdown deregistration |
-| `WatchDirectives` | Hub -> Spoke (stream) | Server-streaming for future hub-initiated commands |
-| `ReportCaptureStatus` | Spoke -> Hub | Push capture status snapshots |
-| `ListCaptures` | Query | List captures, optionally filtered by spoke/namespace |
+| `RegisterAgent` | Agents -> Hub | Register with cluster info, receive heartbeat interval |
+| `Heartbeat` | Agents -> Hub | Periodic health signal with capture summaries |
+| `DeregisterAgent` | Agents -> Hub | Graceful shutdown deregistration |
+| `WatchDirectives` | Hub -> Agents (stream) | Server-streaming for future hub-initiated commands |
+| `ReportCaptureStatus` | Agents -> Hub | Push capture status snapshots |
+| `ListCaptures` | Query | List captures, optionally filtered by agents/namespace |
 | `GetCaptureStatus` | Query | Get status of a specific capture |
-| `ListSpokes` | Query | List all registered spokes with health state |
+| `ListAgents` | Query | List all registered agents with health state |
 
 ## RBAC
 
@@ -523,7 +523,7 @@ The hub and spoke communicate via gRPC (defined in `proto/hub/v1/hub.proto`):
 - `capture.gateway.io` TrafficCaptures: get, list, watch (+ status read)
 - Events: create, patch
 
-### Spoke Controller
+### Agents Controller
 
 - `capture.gateway.io` TrafficCaptures: full CRUD (+ status, finalizers)
 - `capture.gateway.io` CaptureStorages: get, list, watch (+ status)

@@ -371,6 +371,179 @@ func TestMetrics_InitiallyZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// HandleWithResponse tests
+// ---------------------------------------------------------------------------
+
+func TestHandleWithResponse_ValidRequestAndResponse(t *testing.T) {
+	mw := &mockWriter{}
+	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, MaxBodyBytes: 1024, Logger: discardLogger()})
+
+	req := &CapturedHTTPRequest{
+		Method:   "POST",
+		Path:     "/api/data",
+		Headers:  map[string][]string{"X-Req": {"val"}},
+		Body:     strings.NewReader("request-body"),
+		Protocol: "HTTP",
+		Metadata: map[string]string{"captureMode": "proxy"},
+	}
+
+	resp := &CapturedHTTPResponse{
+		StatusCode: 200,
+		Headers:    map[string][]string{"X-Resp": {"ok"}},
+		Body:       strings.NewReader("response-body"),
+		DurationMs: 42,
+		Metadata:   map[string]string{"upstream": "http://backend"},
+	}
+
+	err := h.HandleWithResponse(context.Background(), req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	writes := mw.getWrites()
+	if len(writes) != 1 {
+		t.Fatalf("expected 1 write, got %d", len(writes))
+	}
+
+	w := writes[0]
+	if w.Method != "POST" {
+		t.Errorf("expected method POST, got %s", w.Method)
+	}
+	if string(w.Body) != "request-body" {
+		t.Errorf("expected request body 'request-body', got %q", w.Body)
+	}
+	if w.Response == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if w.Response.StatusCode != 200 {
+		t.Errorf("expected status 200, got %d", w.Response.StatusCode)
+	}
+	if string(w.Response.Body) != "response-body" {
+		t.Errorf("expected response body 'response-body', got %q", w.Response.Body)
+	}
+	if w.Response.DurationMs != 42 {
+		t.Errorf("expected duration 42ms, got %d", w.Response.DurationMs)
+	}
+	if h.ResponsesTotal() != 1 {
+		t.Errorf("expected responsesTotal=1, got %d", h.ResponsesTotal())
+	}
+}
+
+func TestHandleWithResponse_NilResponse(t *testing.T) {
+	mw := &mockWriter{}
+	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, MaxBodyBytes: 1024, Logger: discardLogger()})
+
+	req := &CapturedHTTPRequest{
+		Method:   "GET",
+		Path:     "/no-resp",
+		Body:     strings.NewReader(""),
+		Protocol: "HTTP",
+	}
+
+	err := h.HandleWithResponse(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	writes := mw.getWrites()
+	if len(writes) != 1 {
+		t.Fatalf("expected 1 write, got %d", len(writes))
+	}
+	if writes[0].Response != nil {
+		t.Error("expected nil response when no response provided")
+	}
+	if h.ResponsesTotal() != 0 {
+		t.Errorf("expected responsesTotal=0, got %d", h.ResponsesTotal())
+	}
+}
+
+func TestHandleWithResponse_ResponseBodyTruncation(t *testing.T) {
+	mw := &mockWriter{}
+	maxBytes := int64(10)
+	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, MaxBodyBytes: maxBytes, Logger: discardLogger()})
+
+	req := &CapturedHTTPRequest{
+		Method:   "POST",
+		Path:     "/trunc",
+		Body:     strings.NewReader("short"),
+		Protocol: "HTTP",
+	}
+
+	resp := &CapturedHTTPResponse{
+		StatusCode: 200,
+		Body:       strings.NewReader(strings.Repeat("x", 20)),
+		DurationMs: 10,
+	}
+
+	err := h.HandleWithResponse(context.Background(), req, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w := mw.getWrites()[0]
+	if w.Response == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if int64(len(w.Response.Body)) != maxBytes {
+		t.Errorf("expected response body truncated to %d, got %d", maxBytes, len(w.Response.Body))
+	}
+	if w.Response.Metadata["bodyTruncated"] != "true" {
+		t.Error("expected bodyTruncated=true in response metadata")
+	}
+}
+
+func TestHandleWithResponse_WriterError(t *testing.T) {
+	writeErr := errors.New("write failed")
+	mw := &mockWriter{writeErr: writeErr}
+	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, MaxBodyBytes: 1024, Logger: discardLogger()})
+
+	req := &CapturedHTTPRequest{
+		Method: "GET", Path: "/fail",
+		Body: strings.NewReader("data"), Protocol: "HTTP",
+	}
+	resp := &CapturedHTTPResponse{
+		StatusCode: 200,
+		Body:       strings.NewReader("resp"),
+		DurationMs: 5,
+	}
+
+	err := h.HandleWithResponse(context.Background(), req, resp)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected write error, got %v", err)
+	}
+
+	_, dropped, _ := h.Metrics()
+	if dropped != 1 {
+		t.Errorf("expected dropped=1, got %d", dropped)
+	}
+}
+
+func TestHandleWithResponse_ResponseBodyReadError(t *testing.T) {
+	mw := &mockWriter{}
+	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, MaxBodyBytes: 1024, Logger: discardLogger()})
+
+	req := &CapturedHTTPRequest{
+		Method: "POST", Path: "/resp-fail",
+		Body: strings.NewReader("ok"), Protocol: "HTTP",
+	}
+	resp := &CapturedHTTPResponse{
+		StatusCode: 200,
+		Body:       &errReader{err: errors.New("resp read failed")},
+		DurationMs: 5,
+	}
+
+	err := h.HandleWithResponse(context.Background(), req, resp)
+	if err == nil {
+		t.Fatal("expected error from response body read failure")
+	}
+
+	_, dropped, _ := h.Metrics()
+	if dropped != 1 {
+		t.Errorf("expected dropped=1, got %d", dropped)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // BufferedWriter tests
 // ---------------------------------------------------------------------------
 
@@ -865,10 +1038,140 @@ func TestHandleMetrics_ZeroValues(t *testing.T) {
 		"capture_agent_requests_total 0",
 		"capture_agent_requests_dropped_total 0",
 		"capture_agent_bytes_received_total 0",
+		"capture_agent_responses_total 0",
 	}
 	for _, expected := range expectedZeros {
 		if !strings.Contains(body, expected) {
 			t.Errorf("expected %q in metrics output, got:\n%s", expected, body)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy mode HTTP handler tests
+// ---------------------------------------------------------------------------
+
+func TestHandleHTTPProxy_ForwardsAndCaptures(t *testing.T) {
+	// Upstream echo server.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("X-Echo", "true")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("echo:" + string(body)))
+	}))
+	defer upstream.Close()
+
+	mw := &mockWriter{}
+	handler := NewCaptureHandler(CaptureHandlerConfig{
+		Writer:       mw,
+		MaxBodyBytes: 4096,
+		Logger:       discardLogger(),
+	})
+
+	s := &AgentServer{
+		handler:      handler,
+		log:          discardLogger(),
+		mode:         CaptureModeProxy,
+		upstreamHTTP: upstream.URL,
+	}
+
+	body := bytes.NewBufferString(`{"hello":"world"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/test", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	s.handleHTTPProxy(rec, req)
+
+	// The upstream response should be forwarded to the client.
+	if rec.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", rec.Code)
+	}
+	respBody := rec.Body.String()
+	if respBody != `echo:{"hello":"world"}` {
+		t.Errorf("expected echoed body, got %q", respBody)
+	}
+	if rec.Header().Get("X-Echo") != "true" {
+		t.Error("expected X-Echo header from upstream")
+	}
+
+	// Give the async capture goroutine a moment.
+	time.Sleep(100 * time.Millisecond)
+
+	writes := mw.getWrites()
+	if len(writes) != 1 {
+		t.Fatalf("expected 1 captured write, got %d", len(writes))
+	}
+
+	w := writes[0]
+	if w.Method != "POST" {
+		t.Errorf("expected captured method POST, got %s", w.Method)
+	}
+	if string(w.Body) != `{"hello":"world"}` {
+		t.Errorf("expected captured request body, got %q", w.Body)
+	}
+	if w.Response == nil {
+		t.Fatal("expected captured response")
+	}
+	if w.Response.StatusCode != http.StatusCreated {
+		t.Errorf("expected captured response status 201, got %d", w.Response.StatusCode)
+	}
+	if string(w.Response.Body) != `echo:{"hello":"world"}` {
+		t.Errorf("expected captured response body, got %q", w.Response.Body)
+	}
+}
+
+func TestHandleHTTPProxy_BadUpstream_Returns502(t *testing.T) {
+	mw := &mockWriter{}
+	handler := NewCaptureHandler(CaptureHandlerConfig{
+		Writer:       mw,
+		MaxBodyBytes: 4096,
+		Logger:       discardLogger(),
+	})
+
+	s := &AgentServer{
+		handler:      handler,
+		log:          discardLogger(),
+		mode:         CaptureModeProxy,
+		upstreamHTTP: "://invalid",
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleHTTPProxy(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", rec.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// proxyResponseRecorder tests
+// ---------------------------------------------------------------------------
+
+func TestProxyResponseRecorder(t *testing.T) {
+	rec := &proxyResponseRecorder{
+		headers: make(http.Header),
+		body:    &bytes.Buffer{},
+	}
+
+	rec.Header().Set("Content-Type", "text/plain")
+	rec.WriteHeader(http.StatusOK)
+	n, err := rec.Write([]byte("hello"))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 bytes written, got %d", n)
+	}
+	if rec.statusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.statusCode)
+	}
+	if rec.body.String() != "hello" {
+		t.Errorf("expected body 'hello', got %q", rec.body.String())
+	}
+	if rec.Header().Get("Content-Type") != "text/plain" {
+		t.Errorf("expected Content-Type text/plain, got %s", rec.Header().Get("Content-Type"))
 	}
 }

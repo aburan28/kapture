@@ -34,6 +34,17 @@ type CapturedRequest struct {
 	ContentLength int64               `json:"contentLength,omitempty"`
 	Protocol      string              `json:"protocol"`
 	Metadata      map[string]string   `json:"metadata,omitempty"`
+	Response      *CapturedResponse   `json:"response,omitempty"`
+}
+
+// CapturedResponse holds the response data paired with a captured request.
+type CapturedResponse struct {
+	StatusCode    int                 `json:"statusCode"`
+	Headers       map[string][]string `json:"headers,omitempty"`
+	Body          []byte              `json:"body,omitempty"`
+	ContentLength int64               `json:"contentLength,omitempty"`
+	DurationMs    int64               `json:"durationMs"`
+	Metadata      map[string]string   `json:"metadata,omitempty"`
 }
 
 type Writer interface {

@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"testing"
@@ -147,4 +147,3 @@ func TestBuildHPA(t *testing.T) {
 		t.Errorf("expected max replicas 15, got %d", hpa.Spec.MaxReplicas)
 	}
 }
-

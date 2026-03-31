@@ -12,30 +12,35 @@ import (
 )
 
 func newTestServer() *Server {
-	return NewServer(":0")
+	return NewServer(":0", "")
 }
 
-// helper to register a spoke and fail the test on error.
-func mustRegister(t *testing.T, srv *Server, spokeID, clusterName string) {
+// helper to register a agent and fail the test on error.
+func mustRegister(t *testing.T, srv *Server, agentID, clusterName string) {
 	t.Helper()
-	_, err := srv.RegisterSpoke(context.Background(), &hubv1.RegisterSpokeRequest{
-		SpokeId:     spokeID,
+	_, err := srv.RegisterAgent(context.Background(), &hubv1.RegisterAgentRequest{
+		AgentId:     agentID,
 		ClusterName: clusterName,
 	})
 	if err != nil {
-		t.Fatalf("RegisterSpoke(%q) failed: %v", spokeID, err)
+		t.Fatalf("RegisterAgent(%q) failed: %v", agentID, err)
 	}
 }
 
 // helper to report captures and fail the test on error.
-func mustReportCaptures(t *testing.T, srv *Server, spokeID string, statuses []*hubv1.CaptureStatusSummary) {
+func mustReportCaptures(t *testing.T, srv *Server, agentID string, statuses []*hubv1.CaptureStatusSummary) {
 	t.Helper()
+	for _, status := range statuses {
+		if status.Phase == hubv1.CapturePhase_CAPTURE_PHASE_UNSPECIFIED {
+			status.Phase = hubv1.CapturePhase_CAPTURE_PHASE_ACTIVE
+		}
+	}
 	_, err := srv.ReportCaptureStatus(context.Background(), &hubv1.ReportCaptureStatusRequest{
-		SpokeId:  spokeID,
+		AgentId:  agentID,
 		Statuses: statuses,
 	})
 	if err != nil {
-		t.Fatalf("ReportCaptureStatus(%q) failed: %v", spokeID, err)
+		t.Fatalf("ReportCaptureStatus(%q) failed: %v", agentID, err)
 	}
 }
 
@@ -54,23 +59,23 @@ func assertGRPCCode(t *testing.T, err error, expected codes.Code) {
 }
 
 // ---------------------------------------------------------------------------
-// RegisterSpoke
+// RegisterAgent
 // ---------------------------------------------------------------------------
 
-func TestRegisterSpoke_EmptySpokeID(t *testing.T) {
+func TestRegisterAgent_EmptyAgentID(t *testing.T) {
 	srv := newTestServer()
-	_, err := srv.RegisterSpoke(context.Background(), &hubv1.RegisterSpokeRequest{})
+	_, err := srv.RegisterAgent(context.Background(), &hubv1.RegisterAgentRequest{})
 	assertGRPCCode(t, err, codes.InvalidArgument)
 }
 
-func TestRegisterSpoke_ValidRegistration(t *testing.T) {
+func TestRegisterAgent_ValidRegistration(t *testing.T) {
 	srv := newTestServer()
-	resp, err := srv.RegisterSpoke(context.Background(), &hubv1.RegisterSpokeRequest{
-		SpokeId:     "spoke-1",
+	resp, err := srv.RegisterAgent(context.Background(), &hubv1.RegisterAgentRequest{
+		AgentId:     "agent-1",
 		ClusterName: "cluster-a",
 	})
 	if err != nil {
-		t.Fatalf("RegisterSpoke failed: %v", err)
+		t.Fatalf("RegisterAgent failed: %v", err)
 	}
 	if !resp.Accepted {
 		t.Error("expected Accepted=true")
@@ -78,28 +83,28 @@ func TestRegisterSpoke_ValidRegistration(t *testing.T) {
 	if resp.HeartbeatIntervalSeconds != DefaultHeartbeatInterval {
 		t.Errorf("HeartbeatIntervalSeconds = %d, want %d", resp.HeartbeatIntervalSeconds, DefaultHeartbeatInterval)
 	}
-	if srv.ConnectedSpokeCount() != 1 {
-		t.Errorf("ConnectedSpokeCount = %d, want 1", srv.ConnectedSpokeCount())
+	if srv.ConnectedAgentCount() != 1 {
+		t.Errorf("ConnectedAgentCount = %d, want 1", srv.ConnectedAgentCount())
 	}
 }
 
-func TestRegisterSpoke_ReRegistrationOverwrites(t *testing.T) {
+func TestRegisterAgent_ReRegistrationOverwrites(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "cluster-old")
+	mustRegister(t, srv, "agent-1", "cluster-old")
 
 	// Report a capture so the entry has state.
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1"},
 	})
 	if srv.ActiveCaptureCount() != 1 {
 		t.Fatalf("expected 1 capture before re-registration, got %d", srv.ActiveCaptureCount())
 	}
 
-	// Re-register same spoke with different cluster name.
-	resp, err := srv.RegisterSpoke(ctx, &hubv1.RegisterSpokeRequest{
-		SpokeId:     "spoke-1",
+	// Re-register same agent with different cluster name.
+	resp, err := srv.RegisterAgent(ctx, &hubv1.RegisterAgentRequest{
+		AgentId:     "agent-1",
 		ClusterName: "cluster-new",
 	})
 	if err != nil {
@@ -114,15 +119,15 @@ func TestRegisterSpoke_ReRegistrationOverwrites(t *testing.T) {
 		t.Errorf("expected 0 captures after re-registration, got %d", srv.ActiveCaptureCount())
 	}
 
-	// Only one spoke should exist.
-	if srv.ConnectedSpokeCount() != 1 {
-		t.Errorf("ConnectedSpokeCount = %d, want 1", srv.ConnectedSpokeCount())
+	// Only one agent should exist.
+	if srv.ConnectedAgentCount() != 1 {
+		t.Errorf("ConnectedAgentCount = %d, want 1", srv.ConnectedAgentCount())
 	}
 
-	// Verify new cluster name via SpokeStatuses.
-	statuses := srv.SpokeStatuses()
+	// Verify new cluster name via AgentStatuses.
+	statuses := srv.AgentStatuses()
 	if len(statuses) != 1 {
-		t.Fatalf("expected 1 spoke status, got %d", len(statuses))
+		t.Fatalf("expected 1 agent status, got %d", len(statuses))
 	}
 	if statuses[0].Name != "cluster-new" {
 		t.Errorf("cluster name = %q, want %q", statuses[0].Name, "cluster-new")
@@ -133,15 +138,15 @@ func TestRegisterSpoke_ReRegistrationOverwrites(t *testing.T) {
 // Heartbeat
 // ---------------------------------------------------------------------------
 
-func TestHeartbeat_EmptySpokeID(t *testing.T) {
+func TestHeartbeat_EmptyAgentID(t *testing.T) {
 	srv := newTestServer()
 	_, err := srv.Heartbeat(context.Background(), &hubv1.HeartbeatRequest{})
 	assertGRPCCode(t, err, codes.InvalidArgument)
 }
 
-func TestHeartbeat_UnregisteredSpoke(t *testing.T) {
+func TestHeartbeat_UnregisteredAgent(t *testing.T) {
 	srv := newTestServer()
-	_, err := srv.Heartbeat(context.Background(), &hubv1.HeartbeatRequest{SpokeId: "unknown"})
+	_, err := srv.Heartbeat(context.Background(), &hubv1.HeartbeatRequest{AgentId: "unknown"})
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
@@ -149,15 +154,15 @@ func TestHeartbeat_UpdatesLastHeartbeat(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
 	// Backdate the heartbeat.
 	srv.mu.Lock()
-	srv.spokes["spoke-1"].lastHeartbeat = time.Now().Add(-time.Minute)
+	srv.agents["agent-1"].lastHeartbeat = time.Now().Add(-time.Minute)
 	srv.mu.Unlock()
 
 	before := time.Now()
-	resp, err := srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{SpokeId: "spoke-1"})
+	resp, err := srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{AgentId: "agent-1"})
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -166,7 +171,7 @@ func TestHeartbeat_UpdatesLastHeartbeat(t *testing.T) {
 	}
 
 	srv.mu.RLock()
-	lastHB := srv.spokes["spoke-1"].lastHeartbeat
+	lastHB := srv.agents["agent-1"].lastHeartbeat
 	srv.mu.RUnlock()
 
 	if lastHB.Before(before) {
@@ -178,10 +183,10 @@ func TestHeartbeat_UpdatesActiveCapturesAndSummaries(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
 	resp, err := srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{
-		SpokeId:        "spoke-1",
+		AgentId:        "agent-1",
 		ActiveCaptures: 5,
 		CaptureSummaries: []*hubv1.CaptureStatusSummary{
 			{CaptureName: "cap-a", CaptureNamespace: "ns-1", Phase: hubv1.CapturePhase_CAPTURE_PHASE_ACTIVE, CapturedRequests: 100},
@@ -195,10 +200,10 @@ func TestHeartbeat_UpdatesActiveCapturesAndSummaries(t *testing.T) {
 		t.Error("expected Acknowledged=true")
 	}
 
-	// Verify ActiveCaptures was updated on the spoke info.
+	// Verify ActiveCaptures was updated on the agent info.
 	srv.mu.RLock()
-	ac := srv.spokes["spoke-1"].info.ActiveCaptures
-	numCaptures := len(srv.spokes["spoke-1"].captures)
+	ac := srv.agents["agent-1"].info.ActiveCaptures
+	numCaptures := len(srv.agents["agent-1"].captures)
 	srv.mu.RUnlock()
 
 	if ac != 5 {
@@ -216,40 +221,40 @@ func TestHeartbeat_UpdatesActiveCapturesAndSummaries(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DeregisterSpoke
+// DeregisterAgent
 // ---------------------------------------------------------------------------
 
-func TestDeregisterSpoke_EmptySpokeID(t *testing.T) {
+func TestDeregisterAgent_EmptyAgentID(t *testing.T) {
 	srv := newTestServer()
-	_, err := srv.DeregisterSpoke(context.Background(), &hubv1.DeregisterSpokeRequest{})
+	_, err := srv.DeregisterAgent(context.Background(), &hubv1.DeregisterAgentRequest{})
 	assertGRPCCode(t, err, codes.InvalidArgument)
 }
 
-func TestDeregisterSpoke_UnregisteredSpoke(t *testing.T) {
+func TestDeregisterAgent_UnregisteredAgent(t *testing.T) {
 	srv := newTestServer()
-	_, err := srv.DeregisterSpoke(context.Background(), &hubv1.DeregisterSpokeRequest{SpokeId: "nope"})
+	_, err := srv.DeregisterAgent(context.Background(), &hubv1.DeregisterAgentRequest{AgentId: "nope"})
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
-func TestDeregisterSpoke_Valid(t *testing.T) {
+func TestDeregisterAgent_Valid(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
-	resp, err := srv.DeregisterSpoke(ctx, &hubv1.DeregisterSpokeRequest{SpokeId: "spoke-1"})
+	resp, err := srv.DeregisterAgent(ctx, &hubv1.DeregisterAgentRequest{AgentId: "agent-1"})
 	if err != nil {
-		t.Fatalf("DeregisterSpoke failed: %v", err)
+		t.Fatalf("DeregisterAgent failed: %v", err)
 	}
 	if !resp.Acknowledged {
 		t.Error("expected Acknowledged=true")
 	}
-	if srv.ConnectedSpokeCount() != 0 {
-		t.Errorf("ConnectedSpokeCount = %d, want 0", srv.ConnectedSpokeCount())
+	if srv.ConnectedAgentCount() != 0 {
+		t.Errorf("ConnectedAgentCount = %d, want 0", srv.ConnectedAgentCount())
 	}
 
 	// Verify heartbeat now fails.
-	_, err = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{SpokeId: "spoke-1"})
+	_, err = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{AgentId: "agent-1"})
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
@@ -257,7 +262,7 @@ func TestDeregisterSpoke_Valid(t *testing.T) {
 // ReportCaptureStatus
 // ---------------------------------------------------------------------------
 
-func TestReportCaptureStatus_EmptySpokeID(t *testing.T) {
+func TestReportCaptureStatus_EmptyAgentID(t *testing.T) {
 	srv := newTestServer()
 	_, err := srv.ReportCaptureStatus(context.Background(), &hubv1.ReportCaptureStatusRequest{
 		Statuses: []*hubv1.CaptureStatusSummary{{CaptureName: "c", CaptureNamespace: "n"}},
@@ -267,19 +272,19 @@ func TestReportCaptureStatus_EmptySpokeID(t *testing.T) {
 
 func TestReportCaptureStatus_EmptyStatuses(t *testing.T) {
 	srv := newTestServer()
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
 	_, err := srv.ReportCaptureStatus(context.Background(), &hubv1.ReportCaptureStatusRequest{
-		SpokeId:  "spoke-1",
+		AgentId:  "agent-1",
 		Statuses: nil,
 	})
 	assertGRPCCode(t, err, codes.InvalidArgument)
 }
 
-func TestReportCaptureStatus_UnregisteredSpoke(t *testing.T) {
+func TestReportCaptureStatus_UnregisteredAgent(t *testing.T) {
 	srv := newTestServer()
 	_, err := srv.ReportCaptureStatus(context.Background(), &hubv1.ReportCaptureStatusRequest{
-		SpokeId:  "unknown",
+		AgentId:  "unknown",
 		Statuses: []*hubv1.CaptureStatusSummary{{CaptureName: "c", CaptureNamespace: "n"}},
 	})
 	assertGRPCCode(t, err, codes.NotFound)
@@ -289,10 +294,10 @@ func TestReportCaptureStatus_ValidUpdatesCaptures(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
 	resp, err := srv.ReportCaptureStatus(ctx, &hubv1.ReportCaptureStatusRequest{
-		SpokeId: "spoke-1",
+		AgentId: "agent-1",
 		Statuses: []*hubv1.CaptureStatusSummary{
 			{CaptureName: "cap-a", CaptureNamespace: "ns-1", Phase: hubv1.CapturePhase_CAPTURE_PHASE_ACTIVE, CapturedRequests: 42},
 			{CaptureName: "cap-b", CaptureNamespace: "ns-1", Phase: hubv1.CapturePhase_CAPTURE_PHASE_PENDING},
@@ -310,12 +315,12 @@ func TestReportCaptureStatus_ValidUpdatesCaptures(t *testing.T) {
 		t.Errorf("ActiveCaptureCount = %d, want 2", count)
 	}
 
-	// Verify the spoke's info.ActiveCaptures was updated.
+	// Verify the agent's info.ActiveCaptures was updated.
 	srv.mu.RLock()
-	ac := srv.spokes["spoke-1"].info.ActiveCaptures
+	ac := srv.agents["agent-1"].info.ActiveCaptures
 	srv.mu.RUnlock()
 	if ac != 2 {
-		t.Errorf("spoke info ActiveCaptures = %d, want 2", ac)
+		t.Errorf("agent info ActiveCaptures = %d, want 2", ac)
 	}
 }
 
@@ -323,14 +328,14 @@ func TestReportCaptureStatus_OverwritesExistingCapture(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-a", CaptureNamespace: "ns-1", CapturedRequests: 10},
 	})
 
 	// Report updated status for the same capture.
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-a", CaptureNamespace: "ns-1", CapturedRequests: 99},
 	})
 
@@ -366,18 +371,18 @@ func TestListCaptures_EmptyRegistry(t *testing.T) {
 	}
 }
 
-func TestListCaptures_AllCapturesAcrossSpokes(t *testing.T) {
+func TestListCaptures_AllCapturesAcrossAgents(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1"},
 		{CaptureName: "cap-2", CaptureNamespace: "ns-1"},
 	})
-	mustReportCaptures(t, srv, "spoke-2", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-2", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-3", CaptureNamespace: "ns-2"},
 	})
 
@@ -390,21 +395,21 @@ func TestListCaptures_AllCapturesAcrossSpokes(t *testing.T) {
 	}
 }
 
-func TestListCaptures_FilterBySpokeID(t *testing.T) {
+func TestListCaptures_FilterByAgentID(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns"},
 	})
-	mustReportCaptures(t, srv, "spoke-2", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-2", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-2", CaptureNamespace: "ns"},
 	})
 
-	resp, err := srv.ListCaptures(ctx, &hubv1.ListCapturesRequest{SpokeId: "spoke-1"})
+	resp, err := srv.ListCaptures(ctx, &hubv1.ListCapturesRequest{AgentId: "agent-1"})
 	if err != nil {
 		t.Fatalf("ListCaptures failed: %v", err)
 	}
@@ -420,9 +425,9 @@ func TestListCaptures_FilterByNamespace(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
+	mustRegister(t, srv, "agent-1", "c1")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-alpha"},
 		{CaptureName: "cap-2", CaptureNamespace: "ns-beta"},
 		{CaptureName: "cap-3", CaptureNamespace: "ns-alpha"},
@@ -442,22 +447,22 @@ func TestListCaptures_FilterByNamespace(t *testing.T) {
 	}
 }
 
-func TestListCaptures_FilterBySpokeAndNamespace(t *testing.T) {
+func TestListCaptures_FilterByAgentAndNamespace(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-a"},
 		{CaptureName: "cap-2", CaptureNamespace: "ns-b"},
 	})
-	mustReportCaptures(t, srv, "spoke-2", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-2", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-3", CaptureNamespace: "ns-a"},
 	})
 
-	resp, err := srv.ListCaptures(ctx, &hubv1.ListCapturesRequest{SpokeId: "spoke-1", Namespace: "ns-a"})
+	resp, err := srv.ListCaptures(ctx, &hubv1.ListCapturesRequest{AgentId: "agent-1", Namespace: "ns-a"})
 	if err != nil {
 		t.Fatalf("ListCaptures failed: %v", err)
 	}
@@ -498,61 +503,61 @@ func TestGetCaptureStatus_NotFound(t *testing.T) {
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
-func TestGetCaptureStatus_NotFoundOnSpecificSpoke(t *testing.T) {
+func TestGetCaptureStatus_NotFoundOnSpecificAgent(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c")
+	mustRegister(t, srv, "agent-1", "c")
 
 	_, err := srv.GetCaptureStatus(ctx, &hubv1.GetCaptureStatusRequest{
-		CaptureName: "missing", CaptureNamespace: "ns", SpokeId: "spoke-1",
+		CaptureName: "missing", CaptureNamespace: "ns", AgentId: "agent-1",
 	})
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
-func TestGetCaptureStatus_NotFoundSpokeNotRegistered(t *testing.T) {
+func TestGetCaptureStatus_NotFoundAgentNotRegistered(t *testing.T) {
 	srv := newTestServer()
 	_, err := srv.GetCaptureStatus(context.Background(), &hubv1.GetCaptureStatusRequest{
-		CaptureName: "cap-1", CaptureNamespace: "ns", SpokeId: "unknown-spoke",
+		CaptureName: "cap-1", CaptureNamespace: "ns", AgentId: "unknown-agent",
 	})
 	assertGRPCCode(t, err, codes.NotFound)
 }
 
-func TestGetCaptureStatus_FindsBySpokeID(t *testing.T) {
+func TestGetCaptureStatus_FindsByAgentID(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1", CapturedRequests: 10},
 	})
-	mustReportCaptures(t, srv, "spoke-2", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-2", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1", CapturedRequests: 20},
 	})
 
 	resp, err := srv.GetCaptureStatus(ctx, &hubv1.GetCaptureStatusRequest{
-		CaptureName: "cap-1", CaptureNamespace: "ns-1", SpokeId: "spoke-2",
+		CaptureName: "cap-1", CaptureNamespace: "ns-1", AgentId: "agent-2",
 	})
 	if err != nil {
 		t.Fatalf("GetCaptureStatus failed: %v", err)
 	}
-	if resp.Capture.SpokeId != "spoke-2" {
-		t.Errorf("SpokeId = %q, want %q", resp.Capture.SpokeId, "spoke-2")
+	if resp.Capture.AgentId != "agent-2" {
+		t.Errorf("AgentId = %q, want %q", resp.Capture.AgentId, "agent-2")
 	}
 	if resp.Capture.CapturedRequests != 20 {
 		t.Errorf("CapturedRequests = %d, want 20", resp.Capture.CapturedRequests)
 	}
 }
 
-func TestGetCaptureStatus_FindsAcrossAllSpokes(t *testing.T) {
+func TestGetCaptureStatus_FindsAcrossAllAgents(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
+	mustRegister(t, srv, "agent-1", "c1")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1", Phase: hubv1.CapturePhase_CAPTURE_PHASE_ACTIVE, CapturedRequests: 77},
 	})
 
@@ -565,111 +570,111 @@ func TestGetCaptureStatus_FindsAcrossAllSpokes(t *testing.T) {
 	if resp.Capture.CapturedRequests != 77 {
 		t.Errorf("CapturedRequests = %d, want 77", resp.Capture.CapturedRequests)
 	}
-	if resp.Capture.SpokeId != "spoke-1" {
-		t.Errorf("SpokeId = %q, want %q", resp.Capture.SpokeId, "spoke-1")
+	if resp.Capture.AgentId != "agent-1" {
+		t.Errorf("AgentId = %q, want %q", resp.Capture.AgentId, "agent-1")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// ListSpokes
+// ListAgents
 // ---------------------------------------------------------------------------
 
-func TestListSpokes_EmptyRegistry(t *testing.T) {
+func TestListAgents_EmptyRegistry(t *testing.T) {
 	srv := newTestServer()
-	resp, err := srv.ListSpokes(context.Background(), &hubv1.ListSpokesRequest{})
+	resp, err := srv.ListAgents(context.Background(), &hubv1.ListAgentsRequest{})
 	if err != nil {
-		t.Fatalf("ListSpokes failed: %v", err)
+		t.Fatalf("ListAgents failed: %v", err)
 	}
-	if len(resp.Spokes) != 0 {
-		t.Errorf("expected 0 spokes, got %d", len(resp.Spokes))
+	if len(resp.Agents) != 0 {
+		t.Errorf("expected 0 agents, got %d", len(resp.Agents))
 	}
 }
 
-func TestListSpokes_ReturnsAllRegistered(t *testing.T) {
+func TestListAgents_ReturnsAllRegistered(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "cluster-a")
-	mustRegister(t, srv, "spoke-2", "cluster-b")
+	mustRegister(t, srv, "agent-1", "cluster-a")
+	mustRegister(t, srv, "agent-2", "cluster-b")
 
-	resp, err := srv.ListSpokes(ctx, &hubv1.ListSpokesRequest{})
+	resp, err := srv.ListAgents(ctx, &hubv1.ListAgentsRequest{})
 	if err != nil {
-		t.Fatalf("ListSpokes failed: %v", err)
+		t.Fatalf("ListAgents failed: %v", err)
 	}
-	if len(resp.Spokes) != 2 {
-		t.Errorf("expected 2 spokes, got %d", len(resp.Spokes))
+	if len(resp.Agents) != 2 {
+		t.Errorf("expected 2 agents, got %d", len(resp.Agents))
 	}
 
-	for _, sp := range resp.Spokes {
-		if sp.State != hubv1.SpokeState_SPOKE_STATE_CONNECTED {
-			t.Errorf("spoke %s should be connected, got %v", sp.SpokeId, sp.State)
+	for _, sp := range resp.Agents {
+		if sp.State != hubv1.AgentState_AGENT_STATE_CONNECTED {
+			t.Errorf("agent %s should be connected, got %v", sp.AgentId, sp.State)
 		}
 	}
 }
 
-func TestListSpokes_MarksStaleAsDisconnected(t *testing.T) {
+func TestListAgents_MarksStaleAsDisconnected(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	// Backdate spoke-1's heartbeat beyond the timeout.
+	// Backdate agent-1's heartbeat beyond the timeout.
 	srv.mu.Lock()
-	srv.spokes["spoke-1"].lastHeartbeat = time.Now().Add(-2 * SpokeTimeout)
+	srv.agents["agent-1"].lastHeartbeat = time.Now().Add(-2 * AgentTimeout)
 	srv.mu.Unlock()
 
-	resp, err := srv.ListSpokes(ctx, &hubv1.ListSpokesRequest{})
+	resp, err := srv.ListAgents(ctx, &hubv1.ListAgentsRequest{})
 	if err != nil {
-		t.Fatalf("ListSpokes failed: %v", err)
+		t.Fatalf("ListAgents failed: %v", err)
 	}
 
-	stateByID := make(map[string]hubv1.SpokeState)
-	for _, sp := range resp.Spokes {
-		stateByID[sp.SpokeId] = sp.State
+	stateByID := make(map[string]hubv1.AgentState)
+	for _, sp := range resp.Agents {
+		stateByID[sp.AgentId] = sp.State
 	}
 
-	if stateByID["spoke-1"] != hubv1.SpokeState_SPOKE_STATE_DISCONNECTED {
-		t.Errorf("spoke-1 should be disconnected, got %v", stateByID["spoke-1"])
+	if stateByID["agent-1"] != hubv1.AgentState_AGENT_STATE_DISCONNECTED {
+		t.Errorf("agent-1 should be disconnected, got %v", stateByID["agent-1"])
 	}
-	if stateByID["spoke-2"] != hubv1.SpokeState_SPOKE_STATE_CONNECTED {
-		t.Errorf("spoke-2 should be connected, got %v", stateByID["spoke-2"])
+	if stateByID["agent-2"] != hubv1.AgentState_AGENT_STATE_CONNECTED {
+		t.Errorf("agent-2 should be connected, got %v", stateByID["agent-2"])
 	}
 }
 
 // ---------------------------------------------------------------------------
-// ConnectedSpokeCount
+// ConnectedAgentCount
 // ---------------------------------------------------------------------------
 
-func TestConnectedSpokeCount_EmptyRegistry(t *testing.T) {
+func TestConnectedAgentCount_EmptyRegistry(t *testing.T) {
 	srv := newTestServer()
-	if count := srv.ConnectedSpokeCount(); count != 0 {
-		t.Errorf("ConnectedSpokeCount = %d, want 0", count)
+	if count := srv.ConnectedAgentCount(); count != 0 {
+		t.Errorf("ConnectedAgentCount = %d, want 0", count)
 	}
 }
 
-func TestConnectedSpokeCount_ExcludesTimedOut(t *testing.T) {
+func TestConnectedAgentCount_ExcludesTimedOut(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
-	mustRegister(t, srv, "spoke-3", "c3")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
+	mustRegister(t, srv, "agent-3", "c3")
 
-	// Timeout spoke-2 and spoke-3.
+	// Timeout agent-2 and agent-3.
 	srv.mu.Lock()
-	srv.spokes["spoke-2"].lastHeartbeat = time.Now().Add(-2 * SpokeTimeout)
-	srv.spokes["spoke-3"].lastHeartbeat = time.Now().Add(-2 * SpokeTimeout)
+	srv.agents["agent-2"].lastHeartbeat = time.Now().Add(-2 * AgentTimeout)
+	srv.agents["agent-3"].lastHeartbeat = time.Now().Add(-2 * AgentTimeout)
 	srv.mu.Unlock()
 
-	if count := srv.ConnectedSpokeCount(); count != 1 {
-		t.Errorf("ConnectedSpokeCount = %d, want 1", count)
+	if count := srv.ConnectedAgentCount(); count != 1 {
+		t.Errorf("ConnectedAgentCount = %d, want 1", count)
 	}
 
-	// After heartbeat, spoke-2 should be back.
-	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{SpokeId: "spoke-2"})
-	if count := srv.ConnectedSpokeCount(); count != 2 {
-		t.Errorf("ConnectedSpokeCount = %d, want 2 after heartbeat", count)
+	// After heartbeat, agent-2 should be back.
+	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{AgentId: "agent-2"})
+	if count := srv.ConnectedAgentCount(); count != 2 {
+		t.Errorf("ConnectedAgentCount = %d, want 2 after heartbeat", count)
 	}
 }
 
@@ -684,17 +689,17 @@ func TestActiveCaptureCount_EmptyRegistry(t *testing.T) {
 	}
 }
 
-func TestActiveCaptureCount_SumsAcrossSpokes(t *testing.T) {
+func TestActiveCaptureCount_SumsAcrossAgents(t *testing.T) {
 	srv := newTestServer()
 
-	mustRegister(t, srv, "spoke-1", "c1")
-	mustRegister(t, srv, "spoke-2", "c2")
+	mustRegister(t, srv, "agent-1", "c1")
+	mustRegister(t, srv, "agent-2", "c2")
 
-	mustReportCaptures(t, srv, "spoke-1", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-1", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-1", CaptureNamespace: "ns-1"},
 		{CaptureName: "cap-2", CaptureNamespace: "ns-1"},
 	})
-	mustReportCaptures(t, srv, "spoke-2", []*hubv1.CaptureStatusSummary{
+	mustReportCaptures(t, srv, "agent-2", []*hubv1.CaptureStatusSummary{
 		{CaptureName: "cap-3", CaptureNamespace: "ns-2"},
 	})
 
@@ -703,9 +708,9 @@ func TestActiveCaptureCount_SumsAcrossSpokes(t *testing.T) {
 	}
 }
 
-func TestActiveCaptureCount_RegisteredSpokeWithNoCaptures(t *testing.T) {
+func TestActiveCaptureCount_RegisteredAgentWithNoCaptures(t *testing.T) {
 	srv := newTestServer()
-	mustRegister(t, srv, "spoke-1", "c1")
+	mustRegister(t, srv, "agent-1", "c1")
 
 	if count := srv.ActiveCaptureCount(); count != 0 {
 		t.Errorf("ActiveCaptureCount = %d, want 0", count)
@@ -713,29 +718,29 @@ func TestActiveCaptureCount_RegisteredSpokeWithNoCaptures(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SpokeStatuses
+// AgentStatuses
 // ---------------------------------------------------------------------------
 
-func TestSpokeStatuses_EmptyRegistry(t *testing.T) {
+func TestAgentStatuses_EmptyRegistry(t *testing.T) {
 	srv := newTestServer()
-	statuses := srv.SpokeStatuses()
+	statuses := srv.AgentStatuses()
 	if len(statuses) != 0 {
 		t.Errorf("expected 0 statuses, got %d", len(statuses))
 	}
 }
 
-func TestSpokeStatuses_ReturnsSnapshot(t *testing.T) {
+func TestAgentStatuses_ReturnsSnapshot(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "cluster-a")
+	mustRegister(t, srv, "agent-1", "cluster-a")
 
 	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{
-		SpokeId:        "spoke-1",
+		AgentId:        "agent-1",
 		ActiveCaptures: 3,
 	})
 
-	snapshots := srv.SpokeStatuses()
+	snapshots := srv.AgentStatuses()
 	if len(snapshots) != 1 {
 		t.Fatalf("expected 1 snapshot, got %d", len(snapshots))
 	}
@@ -750,22 +755,22 @@ func TestSpokeStatuses_ReturnsSnapshot(t *testing.T) {
 	}
 }
 
-func TestSpokeStatuses_MultipleSpokes(t *testing.T) {
+func TestAgentStatuses_MultipleAgents(t *testing.T) {
 	srv := newTestServer()
 	ctx := context.Background()
 
-	mustRegister(t, srv, "spoke-1", "cluster-a")
-	mustRegister(t, srv, "spoke-2", "cluster-b")
+	mustRegister(t, srv, "agent-1", "cluster-a")
+	mustRegister(t, srv, "agent-2", "cluster-b")
 
-	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{SpokeId: "spoke-1", ActiveCaptures: 2})
-	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{SpokeId: "spoke-2", ActiveCaptures: 5})
+	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{AgentId: "agent-1", ActiveCaptures: 2})
+	_, _ = srv.Heartbeat(ctx, &hubv1.HeartbeatRequest{AgentId: "agent-2", ActiveCaptures: 5})
 
-	snapshots := srv.SpokeStatuses()
+	snapshots := srv.AgentStatuses()
 	if len(snapshots) != 2 {
 		t.Fatalf("expected 2 snapshots, got %d", len(snapshots))
 	}
 
-	byName := make(map[string]SpokeStatusSnapshot)
+	byName := make(map[string]AgentStatusSnapshot)
 	for _, s := range snapshots {
 		byName[s.Name] = s
 	}

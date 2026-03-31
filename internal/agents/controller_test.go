@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"context"
@@ -146,4 +146,3 @@ func TestReconcile_NotFound(t *testing.T) {
 		t.Fatalf("expected no error for not-found, got: %v", err)
 	}
 }
-

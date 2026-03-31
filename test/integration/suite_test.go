@@ -20,7 +20,7 @@ import (
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
-	"github.com/kapture-io/kapture/internal/spoke"
+	"github.com/kapture-io/kapture/internal/agents"
 )
 
 var (
@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 		panic("failed to create client: " + err.Error())
 	}
 
-	// Start controller manager with the spoke reconciler
+	// Start controller manager with the agents reconciler.
 	ctx, cancel = context.WithCancel(context.Background())
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
@@ -77,7 +77,7 @@ func TestMain(m *testing.M) {
 		panic("failed to create manager: " + err.Error())
 	}
 
-	reconciler := &spoke.TrafficCaptureReconciler{
+	reconciler := &agents.TrafficCaptureReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}
@@ -97,7 +97,6 @@ func TestMain(m *testing.M) {
 	_ = testEnv.Stop()
 	os.Exit(code)
 }
-
 
 // gatewayAPICRDPath discovers the Gateway API CRD YAML directory from the Go module cache.
 func gatewayAPICRDPath() string {

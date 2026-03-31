@@ -5,7 +5,7 @@
 // Prerequisites:
 //   - A running Kubernetes cluster with kubeconfig accessible
 //   - CRDs installed (capture.gateway.io + gateway-api)
-//   - Hub and spoke controllers deployed (e.g. via Helm chart)
+//   - Hub and agents controllers deployed (e.g. via Helm chart)
 //   - Gateway API CRDs installed
 //
 // Run with: go test ./test/e2e/... -v -timeout 600s
@@ -664,15 +664,15 @@ func TestCaptureHubStatusUpdated(t *testing.T) {
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: hubName}, got); err != nil {
 			return false
 		}
-		// Just verify the status fields exist (connectedSpokes should be 0 initially)
-		return got.Status.ConnectedSpokes >= 0
+		// Just verify the status fields exist (connectedAgents should be 0 initially)
+		return got.Status.ConnectedAgents >= 0
 	})
 
 	got := &capturev1alpha1.CaptureHub{}
 	if err := k8sClient.Get(ctx, client.ObjectKey{Name: hubName}, got); err != nil {
 		t.Fatalf("getting CaptureHub: %v", err)
 	}
-	t.Logf("CaptureHub status: connectedSpokes=%d activeCaptures=%d", got.Status.ConnectedSpokes, got.Status.ActiveCaptures)
+	t.Logf("CaptureHub status: connectedAgents=%d activeCaptures=%d", got.Status.ConnectedAgents, got.Status.ActiveCaptures)
 }
 
 // --- Test: Multiple TrafficCaptures in same namespace ---

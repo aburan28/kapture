@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"testing"
@@ -126,4 +126,3 @@ func TestAgentDeploymentName(t *testing.T) {
 		t.Errorf("expected my-capture-capture-agent, got %s", AgentDeploymentName(tc))
 	}
 }
-

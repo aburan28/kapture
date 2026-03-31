@@ -1,0 +1,41 @@
+{{- if .Values.agents.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kapture.fullname" . }}-agents
+  namespace: {{ include "kapture.namespace" . }}
+  labels:
+    {{- include "kapture.agents.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.agents.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kapture.agents.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kapture.agents.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kapture.agents.serviceAccountName" . }}
+      containers:
+        - name: agents
+          image: "{{ .Values.agents.image.repository }}:{{ .Values.agents.image.tag }}"
+          imagePullPolicy: {{ .Values.agents.image.pullPolicy }}
+          env:
+            - name: AGENT_IMAGE
+              value: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+            {{- if .Values.agents.hub.address }}
+            - name: HUB_ADDRESS
+              value: {{ .Values.agents.hub.address | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.agents.resources | nindent 12 }}
+      {{- with .Values.agents.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agents.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

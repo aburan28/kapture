@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"context"
@@ -21,16 +21,16 @@ type mockHubServer struct {
 	heartbeatCalls    int
 	deregisterCalls   int
 	reportStatusCalls int
-	lastSpokeID       string
+	lastAgentID       string
 	lastStatuses      []*hubv1.CaptureStatusSummary
 }
 
-func (m *mockHubServer) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
+func (m *mockHubServer) RegisterAgent(_ context.Context, req *hubv1.RegisterAgentRequest) (*hubv1.RegisterAgentResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registerCalls++
-	m.lastSpokeID = req.SpokeId
-	return &hubv1.RegisterSpokeResponse{
+	m.lastAgentID = req.AgentId
+	return &hubv1.RegisterAgentResponse{
 		Accepted:                 true,
 		Message:                  "registered",
 		HeartbeatIntervalSeconds: 5,
@@ -41,23 +41,23 @@ func (m *mockHubServer) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.heartbeatCalls++
-	m.lastSpokeID = req.SpokeId
+	m.lastAgentID = req.AgentId
 	return &hubv1.HeartbeatResponse{Acknowledged: true}, nil
 }
 
-func (m *mockHubServer) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
+func (m *mockHubServer) DeregisterAgent(_ context.Context, req *hubv1.DeregisterAgentRequest) (*hubv1.DeregisterAgentResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deregisterCalls++
-	m.lastSpokeID = req.SpokeId
-	return &hubv1.DeregisterSpokeResponse{Acknowledged: true}, nil
+	m.lastAgentID = req.AgentId
+	return &hubv1.DeregisterAgentResponse{Acknowledged: true}, nil
 }
 
 func (m *mockHubServer) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reportStatusCalls++
-	m.lastSpokeID = req.SpokeId
+	m.lastAgentID = req.AgentId
 	m.lastStatuses = req.Statuses
 	return &hubv1.ReportCaptureStatusResponse{Acknowledged: true}, nil
 }
@@ -87,7 +87,7 @@ func newTestClient(t *testing.T, addr string) *HubClient {
 	t.Helper()
 	return NewHubClient(HubClientConfig{
 		HubAddress: addr,
-		SpokeName:  "test-spoke",
+		AgentName:  "test-agent",
 		ClusterID:  "test-cluster",
 		Logger:     logr.Discard(),
 	})
@@ -119,8 +119,8 @@ func TestHubClient_ConnectAndRegister(t *testing.T) {
 	if mock.registerCalls != 1 {
 		t.Errorf("expected 1 register call, got %d", mock.registerCalls)
 	}
-	if mock.lastSpokeID != "test-spoke" {
-		t.Errorf("expected spokeID 'test-spoke', got %q", mock.lastSpokeID)
+	if mock.lastAgentID != "test-agent" {
+		t.Errorf("expected agentID 'test-agent', got %q", mock.lastAgentID)
 	}
 	mock.mu.Unlock()
 
@@ -236,7 +236,7 @@ func TestHubClient_StandaloneMode(t *testing.T) {
 	// When not connected, operations should return appropriate errors
 	client := NewHubClient(HubClientConfig{
 		HubAddress: "localhost:0",
-		SpokeName:  "standalone-spoke",
+		AgentName:  "standalone-agent",
 		ClusterID:  "test",
 		Logger:     logr.Discard(),
 	})

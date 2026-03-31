@@ -1,11 +1,14 @@
 // Package hub implements the hub controller and gRPC server that provides
-// global orchestration and visibility across spoke clusters.
+// global orchestration and visibility across agent clusters.
 package hub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,36 +22,39 @@ import (
 )
 
 const (
-	// DefaultHeartbeatInterval is sent to spokes on registration.
+	// DefaultHeartbeatInterval is sent to agents on registration.
 	DefaultHeartbeatInterval = 30
-	// SpokeTimeout is how long after the last heartbeat a spoke is considered disconnected.
-	SpokeTimeout = 90 * time.Second
+	// AgentTimeout is how long after the last heartbeat an agent is considered disconnected.
+	AgentTimeout = 90 * time.Second
 )
 
-// spokeEntry tracks a connected spoke in the in-memory registry.
-type spokeEntry struct {
-	info          *hubv1.SpokeInfo
+// agentEntry tracks a connected agent in the in-memory registry.
+type agentEntry struct {
+	info          *hubv1.AgentInfo
 	lastHeartbeat time.Time
 	captures      map[string]*hubv1.CaptureStatusSummary // key: "namespace/name"
 }
 
-// Server implements hubv1.HubServiceServer and manages spoke registration,
+// Server implements hubv1.HubServiceServer and manages agent registration,
 // heartbeats, and aggregated capture status.
 type Server struct {
 	hubv1.UnimplementedHubServiceServer
 
 	mu     sync.RWMutex
-	spokes map[string]*spokeEntry // key: spoke_id
+	agents map[string]*agentEntry // key: agent_id
 
-	grpcServer *grpc.Server
-	address    string
+	grpcServer       *grpc.Server
+	dashboardServer  *http.Server
+	grpcAddress      string
+	dashboardAddress string
 }
 
-// NewServer creates a new hub gRPC server.
-func NewServer(address string, opts ...grpc.ServerOption) *Server {
+// NewServer creates a new hub gRPC server and optional dashboard server.
+func NewServer(grpcAddress, dashboardAddress string, opts ...grpc.ServerOption) *Server {
 	s := &Server{
-		spokes:  make(map[string]*spokeEntry),
-		address: address,
+		agents:           make(map[string]*agentEntry),
+		grpcAddress:      grpcAddress,
+		dashboardAddress: dashboardAddress,
 	}
 	s.grpcServer = grpc.NewServer(opts...)
 	hubv1.RegisterHubServiceServer(s.grpcServer, s)
@@ -56,28 +62,46 @@ func NewServer(address string, opts ...grpc.ServerOption) *Server {
 }
 
 // NewServerWithTLS creates a new hub gRPC server with TLS credentials.
-func NewServerWithTLS(address string, creds credentials.TransportCredentials) *Server {
-	return NewServer(address, grpc.Creds(creds))
+func NewServerWithTLS(grpcAddress, dashboardAddress string, creds credentials.TransportCredentials) *Server {
+	return NewServer(grpcAddress, dashboardAddress, grpc.Creds(creds))
 }
 
-// Start begins serving gRPC requests. It blocks until the server is stopped.
+// Start begins serving gRPC requests and the optional dashboard. It blocks until
+// the gRPC server is stopped.
 func (s *Server) Start(ctx context.Context) error {
-	lis, err := net.Listen("tcp", s.address)
+	grpcListener, err := net.Listen("tcp", s.grpcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", s.address, err)
+		return fmt.Errorf("failed to listen on %s: %w", s.grpcAddress, err)
 	}
 
-	// Shut down gracefully when context is cancelled.
+	if s.dashboardAddress != "" {
+		dashboardListener, err := net.Listen("tcp", s.dashboardAddress)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", s.dashboardAddress, err)
+		}
+		s.dashboardServer = newDashboardServer(s)
+		go func() {
+			if err := s.dashboardServer.Serve(dashboardListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				_ = dashboardListener.Close()
+			}
+		}()
+	}
+
 	go func() {
 		<-ctx.Done()
-		s.grpcServer.GracefulStop()
+		s.Stop()
 	}()
 
-	return s.grpcServer.Serve(lis)
+	return s.grpcServer.Serve(grpcListener)
 }
 
-// Stop gracefully stops the gRPC server.
+// Stop gracefully stops the gRPC server and dashboard server.
 func (s *Server) Stop() {
+	if s.dashboardServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.dashboardServer.Shutdown(ctx)
+		cancel()
+	}
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
@@ -88,59 +112,61 @@ func (s *Server) GRPCServer() *grpc.Server {
 	return s.grpcServer
 }
 
-// --- Spoke lifecycle RPCs ---
+// DashboardAddress returns the bound dashboard address configuration.
+func (s *Server) DashboardAddress() string {
+	return s.dashboardAddress
+}
 
-// RegisterSpoke registers a spoke cluster with the hub.
-func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
-	if req.GetSpokeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+// RegisterAgent registers an agent cluster with the hub.
+func (s *Server) RegisterAgent(_ context.Context, req *hubv1.RegisterAgentRequest) (*hubv1.RegisterAgentResponse, error) {
+	if req.GetAgentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.spokes[req.SpokeId] = &spokeEntry{
-		info: &hubv1.SpokeInfo{
-			SpokeId:        req.SpokeId,
+	s.agents[req.AgentId] = &agentEntry{
+		info: &hubv1.AgentInfo{
+			AgentId:        req.AgentId,
 			ClusterName:    req.ClusterName,
 			ActiveCaptures: 0,
 			LastHeartbeat:  timestamppb.New(now),
 			Capabilities:   req.Capabilities,
-			State:          hubv1.SpokeState_SPOKE_STATE_CONNECTED,
+			State:          hubv1.AgentState_AGENT_STATE_CONNECTED,
 		},
 		lastHeartbeat: now,
 		captures:      make(map[string]*hubv1.CaptureStatusSummary),
 	}
 
-	return &hubv1.RegisterSpokeResponse{
+	return &hubv1.RegisterAgentResponse{
 		Accepted:                 true,
-		Message:                  "spoke registered",
+		Message:                  "agent registered",
 		HeartbeatIntervalSeconds: DefaultHeartbeatInterval,
 	}, nil
 }
 
-// Heartbeat updates the last-seen timestamp for a spoke.
+// Heartbeat updates the last-seen timestamp for an agent.
 func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hubv1.HeartbeatResponse, error) {
-	if req.GetSpokeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	if req.GetAgentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, ok := s.spokes[req.SpokeId]
+	entry, ok := s.agents[req.AgentId]
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+		return nil, status.Errorf(codes.NotFound, "agent %q not registered", req.AgentId)
 	}
 
 	entry.lastHeartbeat = now
 	entry.info.LastHeartbeat = timestamppb.New(now)
 	entry.info.ActiveCaptures = req.ActiveCaptures
-	entry.info.State = hubv1.SpokeState_SPOKE_STATE_CONNECTED
+	entry.info.State = hubv1.AgentState_AGENT_STATE_CONNECTED
 
-	// Update capture summaries from heartbeat.
 	for _, cs := range req.CaptureSummaries {
 		key := captureKey(cs.CaptureNamespace, cs.CaptureName)
 		entry.captures[key] = cs
@@ -149,48 +175,45 @@ func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hub
 	return &hubv1.HeartbeatResponse{Acknowledged: true}, nil
 }
 
-// DeregisterSpoke removes a spoke from the registry.
-func (s *Server) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
-	if req.GetSpokeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+// DeregisterAgent removes an agent from the registry.
+func (s *Server) DeregisterAgent(_ context.Context, req *hubv1.DeregisterAgentRequest) (*hubv1.DeregisterAgentResponse, error) {
+	if req.GetAgentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.spokes[req.SpokeId]; !ok {
-		return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+	if _, ok := s.agents[req.AgentId]; !ok {
+		return nil, status.Errorf(codes.NotFound, "agent %q not registered", req.AgentId)
 	}
 
-	delete(s.spokes, req.SpokeId)
-	return &hubv1.DeregisterSpokeResponse{Acknowledged: true}, nil
+	delete(s.agents, req.AgentId)
+	return &hubv1.DeregisterAgentResponse{Acknowledged: true}, nil
 }
 
 // WatchDirectives is a server-streaming RPC for hub-initiated capture commands.
 // Currently a no-op that keeps the stream open until the client disconnects.
 func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.ServerStreamingServer[hubv1.WatchDirectivesResponse]) error {
-	if req.GetSpokeId() == "" {
-		return status.Error(codes.InvalidArgument, "spoke_id is required")
+	if req.GetAgentId() == "" {
+		return status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
 	s.mu.RLock()
-	_, ok := s.spokes[req.SpokeId]
+	_, ok := s.agents[req.AgentId]
 	s.mu.RUnlock()
 	if !ok {
-		return status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+		return status.Errorf(codes.NotFound, "agent %q not registered", req.AgentId)
 	}
 
-	// Block until context is done (client disconnects or server shuts down).
 	<-stream.Context().Done()
 	return stream.Context().Err()
 }
 
-// --- Status reporting ---
-
-// ReportCaptureStatus receives capture status updates from a spoke.
+// ReportCaptureStatus receives capture status updates from an agent.
 func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
-	if req.GetSpokeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	if req.GetAgentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 	if len(req.GetStatuses()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one status is required")
@@ -199,37 +222,35 @@ func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCapture
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, ok := s.spokes[req.SpokeId]
+	entry, ok := s.agents[req.AgentId]
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+		return nil, status.Errorf(codes.NotFound, "agent %q not registered", req.AgentId)
 	}
 
 	for _, cs := range req.Statuses {
 		key := captureKey(cs.CaptureNamespace, cs.CaptureName)
 		entry.captures[key] = cs
 	}
-	entry.info.ActiveCaptures = int32(len(entry.captures))
+	entry.info.ActiveCaptures = countInProgressCaptures(entry.captures)
 
 	return &hubv1.ReportCaptureStatusResponse{Acknowledged: true}, nil
 }
 
-// --- Query RPCs ---
-
-// ListCaptures returns all captures across spokes, optionally filtered by spoke_id.
+// ListCaptures returns all captures across agents, optionally filtered by agent_id.
 func (s *Server) ListCaptures(_ context.Context, req *hubv1.ListCapturesRequest) (*hubv1.ListCapturesResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var captures []*hubv1.CaptureInfo
-	for spokeID, entry := range s.spokes {
-		if req.GetSpokeId() != "" && spokeID != req.SpokeId {
+	for agentID, entry := range s.agents {
+		if req.GetAgentId() != "" && agentID != req.AgentId {
 			continue
 		}
 		for _, cs := range entry.captures {
 			if req.GetNamespace() != "" && cs.CaptureNamespace != req.Namespace {
 				continue
 			}
-			captures = append(captures, captureInfoFromSummary(cs, spokeID))
+			captures = append(captures, captureInfoFromSummary(cs, agentID))
 		}
 	}
 
@@ -247,26 +268,24 @@ func (s *Server) GetCaptureStatus(_ context.Context, req *hubv1.GetCaptureStatus
 
 	key := captureKey(req.CaptureNamespace, req.CaptureName)
 
-	// If spoke_id is given, look up directly.
-	if req.GetSpokeId() != "" {
-		entry, ok := s.spokes[req.SpokeId]
+	if req.GetAgentId() != "" {
+		entry, ok := s.agents[req.AgentId]
 		if !ok {
-			return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+			return nil, status.Errorf(codes.NotFound, "agent %q not registered", req.AgentId)
 		}
 		cs, ok := entry.captures[key]
 		if !ok {
-			return nil, status.Errorf(codes.NotFound, "capture %q not found on spoke %q", key, req.SpokeId)
+			return nil, status.Errorf(codes.NotFound, "capture %q not found on agent %q", key, req.AgentId)
 		}
 		return &hubv1.GetCaptureStatusResponse{
-			Capture: captureInfoFromSummary(cs, req.SpokeId),
+			Capture: captureInfoFromSummary(cs, req.AgentId),
 		}, nil
 	}
 
-	// Search all spokes for the capture.
-	for spokeID, entry := range s.spokes {
+	for agentID, entry := range s.agents {
 		if cs, ok := entry.captures[key]; ok {
 			return &hubv1.GetCaptureStatusResponse{
-				Capture: captureInfoFromSummary(cs, spokeID),
+				Capture: captureInfoFromSummary(cs, agentID),
 			}, nil
 		}
 	}
@@ -274,102 +293,237 @@ func (s *Server) GetCaptureStatus(_ context.Context, req *hubv1.GetCaptureStatus
 	return nil, status.Errorf(codes.NotFound, "capture %q not found", key)
 }
 
-// ListSpokes returns information about all registered spokes.
-func (s *Server) ListSpokes(_ context.Context, _ *hubv1.ListSpokesRequest) (*hubv1.ListSpokesResponse, error) {
+// ListAgents returns information about all registered agents.
+func (s *Server) ListAgents(_ context.Context, _ *hubv1.ListAgentsRequest) (*hubv1.ListAgentsResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	spokes := make([]*hubv1.SpokeInfo, 0, len(s.spokes))
+	agents := make([]*hubv1.AgentInfo, 0, len(s.agents))
 	now := time.Now()
-	for _, entry := range s.spokes {
-		info := cloneSpokeInfo(entry.info)
-		// Mark disconnected if heartbeat is stale.
-		if now.Sub(entry.lastHeartbeat) > SpokeTimeout {
-			info.State = hubv1.SpokeState_SPOKE_STATE_DISCONNECTED
+	for _, entry := range s.agents {
+		info := cloneAgentInfo(entry.info)
+		if now.Sub(entry.lastHeartbeat) > AgentTimeout {
+			info.State = hubv1.AgentState_AGENT_STATE_DISCONNECTED
 		}
-		spokes = append(spokes, info)
+		agents = append(agents, info)
 	}
 
-	return &hubv1.ListSpokesResponse{Spokes: spokes}, nil
+	return &hubv1.ListAgentsResponse{Agents: agents}, nil
 }
 
-// --- Status aggregation helpers ---
+// ConnectedAgentCount returns the number of connected agents.
+func (s *Server) ConnectedAgentCount() int32 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-// ConnectedSpokeCount returns the number of connected spokes.
-func (s *Server) ConnectedSpokeCount() int32 {
+	return s.connectedAgentCountAt(time.Now())
+}
+
+// ActiveCaptureCount returns the total number of in-progress captures across all agents.
+func (s *Server) ActiveCaptureCount() int32 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var count int32
+	for _, entry := range s.agents {
+		count += entryActiveCaptures(entry)
+	}
+	return count
+}
+
+// AgentStatuses returns a snapshot of agent statuses for the CaptureHub CR status.
+func (s *Server) AgentStatuses() []AgentStatusSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	now := time.Now()
-	for _, entry := range s.spokes {
-		if now.Sub(entry.lastHeartbeat) <= SpokeTimeout {
+	result := make([]AgentStatusSnapshot, 0, len(s.agents))
+	for _, entry := range s.agents {
+		state := entry.info.State
+		if now.Sub(entry.lastHeartbeat) > AgentTimeout {
+			state = hubv1.AgentState_AGENT_STATE_DISCONNECTED
+		}
+		activeCount := entryActiveCaptures(entry)
+		result = append(result, AgentStatusSnapshot{
+			ID:             entry.info.AgentId,
+			Name:           entry.info.ClusterName,
+			LastHeartbeat:  entry.lastHeartbeat,
+			ActiveCaptures: activeCount,
+			State:          state,
+			Capabilities:   append([]string(nil), entry.info.Capabilities...),
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name == result[j].Name {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// DashboardSnapshot returns the aggregated hub state used by the dashboard.
+func (s *Server) DashboardSnapshot() DashboardSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now()
+	snapshot := DashboardSnapshot{
+		GeneratedAt:        now,
+		ConnectedAgents:    s.connectedAgentCountAt(now),
+		ActiveCaptures:     0,
+		InProgressCount:    0,
+		Agents:             make([]AgentStatusSnapshot, 0, len(s.agents)),
+		InProgressCaptures: []CaptureSnapshot{},
+	}
+
+	for _, entry := range s.agents {
+		state := entry.info.State
+		if now.Sub(entry.lastHeartbeat) > AgentTimeout {
+			state = hubv1.AgentState_AGENT_STATE_DISCONNECTED
+		}
+
+		activeCount := entryActiveCaptures(entry)
+		snapshot.Agents = append(snapshot.Agents, AgentStatusSnapshot{
+			ID:             entry.info.AgentId,
+			Name:           entry.info.ClusterName,
+			LastHeartbeat:  entry.lastHeartbeat,
+			ActiveCaptures: activeCount,
+			State:          state,
+			Capabilities:   append([]string(nil), entry.info.Capabilities...),
+		})
+
+		for _, cs := range entry.captures {
+			if !isCaptureInProgress(cs.Phase) {
+				continue
+			}
+			snapshot.InProgressCaptures = append(snapshot.InProgressCaptures, CaptureSnapshot{
+				Name:             cs.CaptureName,
+				Namespace:        cs.CaptureNamespace,
+				AgentID:          entry.info.AgentId,
+				ClusterName:      entry.info.ClusterName,
+				Phase:            cs.Phase,
+				CapturedRequests: cs.CapturedRequests,
+				BytesWritten:     cs.BytesWritten,
+				ReadyReplicas:    cs.ReadyReplicas,
+				DesiredReplicas:  cs.DesiredReplicas,
+			})
+		}
+	}
+
+	snapshot.ActiveCaptures = int32(len(snapshot.InProgressCaptures))
+	snapshot.InProgressCount = len(snapshot.InProgressCaptures)
+
+	sort.Slice(snapshot.Agents, func(i, j int) bool {
+		if snapshot.Agents[i].Name == snapshot.Agents[j].Name {
+			return snapshot.Agents[i].ID < snapshot.Agents[j].ID
+		}
+		return snapshot.Agents[i].Name < snapshot.Agents[j].Name
+	})
+	sort.Slice(snapshot.InProgressCaptures, func(i, j int) bool {
+		left := snapshot.InProgressCaptures[i]
+		right := snapshot.InProgressCaptures[j]
+		if left.ClusterName == right.ClusterName {
+			if left.Namespace == right.Namespace {
+				return left.Name < right.Name
+			}
+			return left.Namespace < right.Namespace
+		}
+		return left.ClusterName < right.ClusterName
+	})
+
+	return snapshot
+}
+
+// AgentStatusSnapshot is a plain Go struct used by the controller and dashboard.
+type AgentStatusSnapshot struct {
+	ID             string
+	Name           string
+	LastHeartbeat  time.Time
+	ActiveCaptures int32
+	State          hubv1.AgentState
+	Capabilities   []string
+}
+
+// CaptureSnapshot is the dashboard-ready capture view model.
+type CaptureSnapshot struct {
+	Name             string
+	Namespace        string
+	AgentID          string
+	ClusterName      string
+	Phase            hubv1.CapturePhase
+	CapturedRequests int64
+	BytesWritten     int64
+	ReadyReplicas    int32
+	DesiredReplicas  int32
+}
+
+// DashboardSnapshot is the aggregated hub snapshot rendered by the dashboard.
+type DashboardSnapshot struct {
+	GeneratedAt        time.Time
+	ConnectedAgents    int32
+	ActiveCaptures     int32
+	InProgressCount    int
+	Agents             []AgentStatusSnapshot
+	InProgressCaptures []CaptureSnapshot
+}
+
+func captureKey(namespace, name string) string {
+	return namespace + "/" + name
+}
+
+func captureInfoFromSummary(cs *hubv1.CaptureStatusSummary, agentID string) *hubv1.CaptureInfo {
+	return &hubv1.CaptureInfo{
+		CaptureName:      cs.CaptureName,
+		CaptureNamespace: cs.CaptureNamespace,
+		AgentId:          agentID,
+		Phase:            cs.Phase,
+		CapturedRequests: cs.CapturedRequests,
+		BytesWritten:     cs.BytesWritten,
+		ReadyReplicas:    cs.ReadyReplicas,
+		DesiredReplicas:  cs.DesiredReplicas,
+	}
+}
+
+func cloneAgentInfo(info *hubv1.AgentInfo) *hubv1.AgentInfo {
+	return &hubv1.AgentInfo{
+		AgentId:        info.AgentId,
+		ClusterName:    info.ClusterName,
+		ActiveCaptures: info.ActiveCaptures,
+		LastHeartbeat:  info.LastHeartbeat,
+		Capabilities:   append([]string(nil), info.Capabilities...),
+		State:          info.State,
+	}
+}
+
+func (s *Server) connectedAgentCountAt(now time.Time) int32 {
+	var count int32
+	for _, entry := range s.agents {
+		if now.Sub(entry.lastHeartbeat) <= AgentTimeout {
 			count++
 		}
 	}
 	return count
 }
 
-// ActiveCaptureCount returns the total number of active captures across all spokes.
-func (s *Server) ActiveCaptureCount() int32 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+func countInProgressCaptures(captures map[string]*hubv1.CaptureStatusSummary) int32 {
 	var count int32
-	for _, entry := range s.spokes {
-		count += int32(len(entry.captures))
+	for _, capture := range captures {
+		if isCaptureInProgress(capture.GetPhase()) {
+			count++
+		}
 	}
 	return count
 }
 
-// SpokeStatuses returns a snapshot of spoke statuses for the CaptureHub CR status.
-func (s *Server) SpokeStatuses() []SpokeStatusSnapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]SpokeStatusSnapshot, 0, len(s.spokes))
-	for _, entry := range s.spokes {
-		result = append(result, SpokeStatusSnapshot{
-			Name:           entry.info.ClusterName,
-			LastHeartbeat:  entry.lastHeartbeat,
-			ActiveCaptures: entry.info.ActiveCaptures,
-		})
+func entryActiveCaptures(entry *agentEntry) int32 {
+	if counted := countInProgressCaptures(entry.captures); counted > entry.info.ActiveCaptures {
+		return counted
 	}
-	return result
+	return entry.info.ActiveCaptures
 }
 
-// SpokeStatusSnapshot is a plain Go struct used by the controller to update
-// CaptureHub CR status without importing proto types.
-type SpokeStatusSnapshot struct {
-	Name           string
-	LastHeartbeat  time.Time
-	ActiveCaptures int32
-}
-
-// --- Helpers ---
-
-func captureKey(namespace, name string) string {
-	return namespace + "/" + name
-}
-
-func captureInfoFromSummary(cs *hubv1.CaptureStatusSummary, spokeID string) *hubv1.CaptureInfo {
-	return &hubv1.CaptureInfo{
-		CaptureName:      cs.CaptureName,
-		CaptureNamespace: cs.CaptureNamespace,
-		SpokeId:          spokeID,
-		Phase:            cs.Phase,
-		CapturedRequests: cs.CapturedRequests,
-		BytesWritten:     cs.BytesWritten,
-	}
-}
-
-func cloneSpokeInfo(info *hubv1.SpokeInfo) *hubv1.SpokeInfo {
-	return &hubv1.SpokeInfo{
-		SpokeId:        info.SpokeId,
-		ClusterName:    info.ClusterName,
-		ActiveCaptures: info.ActiveCaptures,
-		LastHeartbeat:  info.LastHeartbeat,
-		Capabilities:   info.Capabilities,
-		State:          info.State,
-	}
+func isCaptureInProgress(phase hubv1.CapturePhase) bool {
+	return phase == hubv1.CapturePhase_CAPTURE_PHASE_PENDING || phase == hubv1.CapturePhase_CAPTURE_PHASE_ACTIVE
 }

@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"context"
@@ -210,4 +210,3 @@ func removeGRPCMirrorFilters(filters []gwapiv1.GRPCRouteFilter, agentServiceName
 func ptrTo[T any](v T) *T {
 	return &v
 }
-

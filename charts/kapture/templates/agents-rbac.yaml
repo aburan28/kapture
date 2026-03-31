@@ -1,10 +1,10 @@
-{{- if .Values.spoke.enabled }}
+{{- if .Values.agents.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "kapture.fullname" . }}-spoke
+  name: {{ include "kapture.fullname" . }}-agents
   labels:
-    {{- include "kapture.spoke.labels" . | nindent 4 }}
+    {{- include "kapture.agents.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["capture.gateway.io"]
     resources: ["trafficcaptures"]
@@ -37,16 +37,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "kapture.fullname" . }}-spoke
+  name: {{ include "kapture.fullname" . }}-agents
   labels:
-    {{- include "kapture.spoke.labels" . | nindent 4 }}
+    {{- include "kapture.agents.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "kapture.fullname" . }}-spoke
+  name: {{ include "kapture.fullname" . }}-agents
 subjects:
   - kind: ServiceAccount
-    name: {{ include "kapture.spoke.serviceAccountName" . }}
+    name: {{ include "kapture.agents.serviceAccountName" . }}
     namespace: {{ include "kapture.namespace" . }}
 {{- end }}
-

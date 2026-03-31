@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"testing"

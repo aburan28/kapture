@@ -1,4 +1,4 @@
-package spoke
+package agents
 
 import (
 	"context"
@@ -14,22 +14,22 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// HubClient manages the gRPC connection from a spoke to the hub.
+// HubClient manages the gRPC connection from an agent to the hub.
 type HubClient struct {
 	log        logr.Logger
 	hubAddress string
-	spokeName  string
+	agentName  string
 	clusterID  string
-	spokeID    string
+	agentID    string
 	tlsConfig  *tls.Config
 
 	conn   *grpc.ClientConn
 	client hubv1.HubServiceClient
 
-	mu             sync.RWMutex
-	connected      bool
-	heartbeatStop  chan struct{}
-	directiveStop  chan struct{}
+	mu            sync.RWMutex
+	connected     bool
+	heartbeatStop chan struct{}
+	directiveStop chan struct{}
 
 	// OnDirective is called when a hub-initiated directive is received.
 	OnDirective func(directive *hubv1.WatchDirectivesResponse)
@@ -38,7 +38,7 @@ type HubClient struct {
 // HubClientConfig holds configuration for the HubClient.
 type HubClientConfig struct {
 	HubAddress string
-	SpokeName  string
+	AgentName  string
 	ClusterID  string
 	TLSConfig  *tls.Config
 	Logger     logr.Logger
@@ -49,7 +49,7 @@ func NewHubClient(cfg HubClientConfig) *HubClient {
 	return &HubClient{
 		log:        cfg.Logger.WithName("hub-client"),
 		hubAddress: cfg.HubAddress,
-		spokeName:  cfg.SpokeName,
+		agentName:  cfg.AgentName,
 		clusterID:  cfg.ClusterID,
 		tlsConfig:  cfg.TLSConfig,
 	}
@@ -79,7 +79,7 @@ func (c *HubClient) Connect(ctx context.Context) error {
 	return nil
 }
 
-// Register registers this spoke with the hub.
+// Register registers this agent with the hub.
 func (c *HubClient) Register(ctx context.Context) (int32, error) {
 	c.mu.RLock()
 	client := c.client
@@ -88,24 +88,24 @@ func (c *HubClient) Register(ctx context.Context) (int32, error) {
 		return 0, fmt.Errorf("not connected to hub")
 	}
 
-	resp, err := client.RegisterSpoke(ctx, &hubv1.RegisterSpokeRequest{
-		SpokeId:     c.spokeName,
+	resp, err := client.RegisterAgent(ctx, &hubv1.RegisterAgentRequest{
+		AgentId:     c.agentName,
 		ClusterName: c.clusterID,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("registering spoke: %w", err)
+		return 0, fmt.Errorf("registering agent: %w", err)
 	}
 
 	if !resp.Accepted {
-		return 0, fmt.Errorf("spoke registration rejected: %s", resp.Message)
+		return 0, fmt.Errorf("agent registration rejected: %s", resp.Message)
 	}
 
 	c.mu.Lock()
-	c.spokeID = c.spokeName
+	c.agentID = c.agentName
 	c.mu.Unlock()
 
 	c.log.Info("registered with hub",
-		"spokeID", c.spokeName,
+		"agentID", c.agentName,
 		"heartbeatInterval", resp.HeartbeatIntervalSeconds,
 	)
 
@@ -144,7 +144,7 @@ func (c *HubClient) StartHeartbeat(ctx context.Context, interval time.Duration) 
 func (c *HubClient) sendHeartbeat(ctx context.Context) {
 	c.mu.RLock()
 	client := c.client
-	spokeID := c.spokeID
+	agentID := c.agentID
 	c.mu.RUnlock()
 	if client == nil {
 		return
@@ -154,7 +154,7 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 	defer cancel()
 
 	_, err := client.Heartbeat(ctx, &hubv1.HeartbeatRequest{
-		SpokeId: spokeID,
+		AgentId: agentID,
 	})
 	if err != nil {
 		c.log.Error(err, "heartbeat failed")
@@ -166,7 +166,7 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 func (c *HubClient) ReportStatus(ctx context.Context, statuses []*hubv1.CaptureStatusSummary) error {
 	c.mu.RLock()
 	client := c.client
-	spokeID := c.spokeID
+	agentID := c.agentID
 	c.mu.RUnlock()
 	if client == nil {
 		return fmt.Errorf("not connected to hub")
@@ -176,7 +176,7 @@ func (c *HubClient) ReportStatus(ctx context.Context, statuses []*hubv1.CaptureS
 	defer cancel()
 
 	_, err := client.ReportCaptureStatus(ctx, &hubv1.ReportCaptureStatusRequest{
-		SpokeId:  spokeID,
+		AgentId:  agentID,
 		Statuses: statuses,
 	})
 	if err != nil {
@@ -213,7 +213,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 
 		c.mu.RLock()
 		client := c.client
-		spokeID := c.spokeID
+		agentID := c.agentID
 		c.mu.RUnlock()
 		if client == nil {
 			time.Sleep(backoff)
@@ -221,7 +221,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 		}
 
 		stream, err := client.WatchDirectives(ctx, &hubv1.WatchDirectivesRequest{
-			SpokeId: spokeID,
+			AgentId: agentID,
 		})
 		if err != nil {
 			c.log.Error(err, "opening directive stream", "backoff", backoff)
@@ -244,11 +244,11 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 	}
 }
 
-// Deregister deregisters this spoke from the hub.
+// Deregister deregisters this agent from the hub.
 func (c *HubClient) Deregister(ctx context.Context) error {
 	c.mu.RLock()
 	client := c.client
-	spokeID := c.spokeID
+	agentID := c.agentID
 	c.mu.RUnlock()
 	if client == nil {
 		return nil
@@ -257,13 +257,13 @@ func (c *HubClient) Deregister(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	_, err := client.DeregisterSpoke(ctx, &hubv1.DeregisterSpokeRequest{
-		SpokeId: spokeID,
-		Reason:  "spoke shutting down",
+	_, err := client.DeregisterAgent(ctx, &hubv1.DeregisterAgentRequest{
+		AgentId: agentID,
+		Reason:  "agent shutting down",
 	})
 	if err != nil {
 		c.log.Error(err, "failed to deregister from hub")
-		return fmt.Errorf("deregistering spoke: %w", err)
+		return fmt.Errorf("deregistering agent: %w", err)
 	}
 
 	c.log.Info("deregistered from hub")
@@ -297,4 +297,3 @@ func (c *HubClient) IsConnected() bool {
 	defer c.mu.RUnlock()
 	return c.connected
 }
-

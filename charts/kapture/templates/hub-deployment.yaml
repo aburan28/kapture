@@ -25,6 +25,9 @@ spec:
             - name: grpc
               containerPort: 9443
               protocol: TCP
+            - name: dashboard
+              containerPort: 8082
+              protocol: TCP
           resources:
             {{- toYaml .Values.hub.resources | nindent 12 }}
           {{- if .Values.hub.tls.secretName }}
@@ -48,4 +51,3 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 {{- end }}
-

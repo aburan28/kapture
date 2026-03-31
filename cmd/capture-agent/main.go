@@ -26,6 +26,14 @@ func main() {
 		maxBodyBytes  = flag.Int64("max-body-bytes", 1<<20, "Max request body size in bytes")
 		batchSize     = flag.Int("batch-size", 100, "Buffered writer batch size")
 		flushInterval = flag.Duration("flush-interval", 5*time.Second, "Buffered writer flush interval")
+
+		// Proxy-mode flags
+		mode          = flag.String("mode", "mirror", "Capture mode: mirror (passive sink) or proxy (inline reverse proxy)")
+		upstreamHTTP  = flag.String("upstream-http", "", "Upstream HTTP base URL for proxy mode (e.g. http://my-service:8080)")
+		upstreamGRPC  = flag.String("upstream-grpc", "", "Upstream gRPC address for proxy mode (e.g. my-service:9090)")
+
+		// Health check flags
+		healthCheckInterval = flag.Duration("health-check-interval", 30*time.Second, "Interval between in-flight health checks")
 	)
 	flag.Parse()
 
@@ -33,6 +41,12 @@ func main() {
 
 	if *captureID == "" {
 		log.Error("--capture-id is required")
+		os.Exit(1)
+	}
+
+	captureMode := agent.CaptureMode(*mode)
+	if captureMode == agent.CaptureModeProxy && *upstreamHTTP == "" && *upstreamGRPC == "" {
+		log.Error("proxy mode requires at least one of --upstream-http or --upstream-grpc")
 		os.Exit(1)
 	}
 
@@ -68,16 +82,37 @@ func main() {
 		Logger:       log,
 	})
 
-	server := agent.NewAgentServer(agent.AgentServerConfig{
-		HTTPPort:   *httpPort,
-		GRPCPort:   *grpcPort,
-		HealthPort: *healthPort,
-		Handler:    handler,
-		Logger:     log,
+	// Set up health checker with pre-flight and in-flight probes.
+	healthChecker := agent.NewHealthChecker(agent.HealthCheckerConfig{
+		WriterFactory: factory,
+		StorageType:   *storageType,
+		UpstreamAddr:  *upstreamHTTP,
+		Logger:        log,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// Run pre-flight checks before accepting traffic.
+	if err := healthChecker.RunPreflightChecks(ctx); err != nil {
+		log.Error("pre-flight health checks failed", "error", err)
+		os.Exit(1)
+	}
+
+	// Start background in-flight health checks.
+	go healthChecker.StartBackgroundChecks(ctx, *healthCheckInterval)
+
+	server := agent.NewAgentServer(agent.AgentServerConfig{
+		HTTPPort:      *httpPort,
+		GRPCPort:      *grpcPort,
+		HealthPort:    *healthPort,
+		Handler:       handler,
+		Logger:        log,
+		Mode:          captureMode,
+		UpstreamHTTP:  *upstreamHTTP,
+		UpstreamGRPC:  *upstreamGRPC,
+		HealthChecker: healthChecker,
+	})
 
 	log.Info("starting capture agent",
 		"captureID", *captureID,
@@ -85,6 +120,9 @@ func main() {
 		"grpcPort", *grpcPort,
 		"healthPort", *healthPort,
 		"storageType", *storageType,
+		"mode", *mode,
+		"upstreamHTTP", *upstreamHTTP,
+		"upstreamGRPC", *upstreamGRPC,
 	)
 
 	if err := server.Start(ctx); err != nil {

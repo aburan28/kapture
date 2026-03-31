@@ -55,20 +55,20 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Spoke labels
+Agents labels
 */}}
-{{- define "kapture.spoke.labels" -}}
+{{- define "kapture.agents.labels" -}}
 {{ include "kapture.labels" . }}
-app.kubernetes.io/name: {{ include "kapture.name" . }}-spoke
+app.kubernetes.io/name: {{ include "kapture.name" . }}-agents
 app.kubernetes.io/instance: {{ .Release.Name }}
-app.kubernetes.io/component: spoke
+app.kubernetes.io/component: agents
 {{- end }}
 
 {{/*
-Spoke selector labels
+Agents selector labels
 */}}
-{{- define "kapture.spoke.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "kapture.name" . }}-spoke
+{{- define "kapture.agents.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-agents
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -84,11 +84,11 @@ Hub ServiceAccount name
 {{- end }}
 
 {{/*
-Spoke ServiceAccount name
+Agents ServiceAccount name
 */}}
-{{- define "kapture.spoke.serviceAccountName" -}}
-{{- if .Values.spoke.serviceAccount.create }}
-{{- default (printf "%s-spoke" (include "kapture.fullname" .)) }}
+{{- define "kapture.agents.serviceAccountName" -}}
+{{- if .Values.agents.serviceAccount.create }}
+{{- default (printf "%s-agents" (include "kapture.fullname" .)) }}
 {{- else }}
 {{- default "default" }}
 {{- end }}
@@ -100,4 +100,3 @@ Namespace helper
 {{- define "kapture.namespace" -}}
 {{- default .Release.Namespace .Values.namespace }}
 {{- end }}
-

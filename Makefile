@@ -15,7 +15,7 @@ test:
 
 docker-build:
 	docker build -f Dockerfile.hub -t kapture/hub:dev .
-	docker build -f Dockerfile.spoke -t kapture/spoke:dev .
+	docker build -f Dockerfile.agents -t kapture/agents:dev .
 	docker build -f Dockerfile.agent -t kapture/agent:dev .
 
 lint:

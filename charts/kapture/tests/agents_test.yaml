@@ -1,18 +1,18 @@
-suite: spoke tests
+suite: agents tests
 templates:
-  - spoke-deployment.yaml
-  - spoke-serviceaccount.yaml
-  - spoke-rbac.yaml
+  - agents-deployment.yaml
+  - agents-serviceaccount.yaml
+  - agents-rbac.yaml
 tests:
   # --- Deployment ---
-  - it: should render spoke deployment with defaults
-    template: spoke-deployment.yaml
+  - it: should render agents deployment with defaults
+    template: agents-deployment.yaml
     asserts:
       - isKind:
           of: Deployment
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
       - equal:
           path: metadata.namespace
           value: NAMESPACE
@@ -21,13 +21,13 @@ tests:
           value: 1
       - equal:
           path: spec.template.spec.serviceAccountName
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
       - equal:
           path: spec.template.spec.containers[0].name
-          value: spoke
+          value: agents
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "kapture/spoke:dev"
+          value: "kapture/agents:dev"
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: IfNotPresent
@@ -50,18 +50,18 @@ tests:
           path: spec.template.spec.containers[0].resources.requests.memory
           value: 128Mi
 
-  - it: should not render spoke deployment when spoke.enabled is false
-    template: spoke-deployment.yaml
+  - it: should not render agents deployment when agents.enabled is false
+    template: agents-deployment.yaml
     set:
-      spoke.enabled: false
+      agents.enabled: false
     asserts:
       - hasDocuments:
           count: 0
 
-  - it: should render spoke deployment with hub address
-    template: spoke-deployment.yaml
+  - it: should render agents deployment with hub address
+    template: agents-deployment.yaml
     set:
-      spoke.hub.address: "hub-service.capture-system.svc:9443"
+      agents.hub.address: "hub-service.capture-system.svc:9443"
     asserts:
       - equal:
           path: spec.template.spec.containers[0].env[1].name
@@ -70,15 +70,15 @@ tests:
           path: spec.template.spec.containers[0].env[1].value
           value: "hub-service.capture-system.svc:9443"
 
-  - it: should render spoke deployment with nodeSelector and tolerations
-    template: spoke-deployment.yaml
+  - it: should render agents deployment with nodeSelector and tolerations
+    template: agents-deployment.yaml
     set:
-      spoke.nodeSelector:
+      agents.nodeSelector:
         disktype: ssd
-      spoke.tolerations:
+      agents.tolerations:
         - key: "dedicated"
           operator: "Equal"
-          value: "spoke"
+          value: "agents"
           effect: "NoSchedule"
     asserts:
       - equal:
@@ -92,35 +92,35 @@ tests:
           value: Equal
       - equal:
           path: spec.template.spec.tolerations[0].value
-          value: spoke
+          value: agents
       - equal:
           path: spec.template.spec.tolerations[0].effect
           value: NoSchedule
 
   # --- ServiceAccount ---
-  - it: should render spoke serviceaccount with defaults
-    template: spoke-serviceaccount.yaml
+  - it: should render agents serviceaccount with defaults
+    template: agents-serviceaccount.yaml
     asserts:
       - isKind:
           of: ServiceAccount
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
       - equal:
           path: metadata.namespace
           value: NAMESPACE
 
-  - it: should not render spoke serviceaccount when spoke.serviceAccount.create is false
-    template: spoke-serviceaccount.yaml
+  - it: should not render agents serviceaccount when agents.serviceAccount.create is false
+    template: agents-serviceaccount.yaml
     set:
-      spoke.serviceAccount.create: false
+      agents.serviceAccount.create: false
     asserts:
       - hasDocuments:
           count: 0
 
   # --- RBAC ---
-  - it: should render spoke ClusterRole and ClusterRoleBinding with all required rules
-    template: spoke-rbac.yaml
+  - it: should render agents ClusterRole and ClusterRoleBinding with all required rules
+    template: agents-rbac.yaml
     asserts:
       - hasDocuments:
           count: 2
@@ -129,7 +129,7 @@ tests:
         documentIndex: 0
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
         documentIndex: 0
       - equal:
           path: rules[0].apiGroups[0]
@@ -164,7 +164,7 @@ tests:
         documentIndex: 1
       - equal:
           path: metadata.name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
         documentIndex: 1
       - equal:
           path: roleRef.kind
@@ -172,7 +172,7 @@ tests:
         documentIndex: 1
       - equal:
           path: roleRef.name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
         documentIndex: 1
       - equal:
           path: subjects[0].kind
@@ -180,5 +180,5 @@ tests:
         documentIndex: 1
       - equal:
           path: subjects[0].name
-          value: RELEASE-NAME-kapture-spoke
+          value: RELEASE-NAME-kapture-agents
         documentIndex: 1

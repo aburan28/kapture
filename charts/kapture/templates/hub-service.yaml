@@ -13,7 +13,10 @@ spec:
       targetPort: grpc
       protocol: TCP
       name: grpc
+    - port: {{ .Values.hub.service.dashboardPort }}
+      targetPort: dashboard
+      protocol: TCP
+      name: dashboard
   selector:
     {{- include "kapture.hub.selectorLabels" . | nindent 4 }}
 {{- end }}
-

@@ -19,34 +19,34 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HubService_RegisterSpoke_FullMethodName       = "/hub.v1.HubService/RegisterSpoke"
+	HubService_RegisterAgent_FullMethodName       = "/hub.v1.HubService/RegisterAgent"
 	HubService_Heartbeat_FullMethodName           = "/hub.v1.HubService/Heartbeat"
-	HubService_DeregisterSpoke_FullMethodName     = "/hub.v1.HubService/DeregisterSpoke"
+	HubService_DeregisterAgent_FullMethodName     = "/hub.v1.HubService/DeregisterAgent"
 	HubService_WatchDirectives_FullMethodName     = "/hub.v1.HubService/WatchDirectives"
 	HubService_ReportCaptureStatus_FullMethodName = "/hub.v1.HubService/ReportCaptureStatus"
 	HubService_ListCaptures_FullMethodName        = "/hub.v1.HubService/ListCaptures"
 	HubService_GetCaptureStatus_FullMethodName    = "/hub.v1.HubService/GetCaptureStatus"
-	HubService_ListSpokes_FullMethodName          = "/hub.v1.HubService/ListSpokes"
+	HubService_ListAgents_FullMethodName          = "/hub.v1.HubService/ListAgents"
 )
 
 // HubServiceClient is the client API for HubService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// HubService defines the gRPC API between the hub and spoke controllers.
+// HubService defines the gRPC API between the hub and agent controllers.
 type HubServiceClient interface {
-	// Spoke lifecycle
-	RegisterSpoke(ctx context.Context, in *RegisterSpokeRequest, opts ...grpc.CallOption) (*RegisterSpokeResponse, error)
+	// Agent lifecycle
+	RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error)
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
-	DeregisterSpoke(ctx context.Context, in *DeregisterSpokeRequest, opts ...grpc.CallOption) (*DeregisterSpokeResponse, error)
-	// Capture orchestration (hub → spoke directives via server-streaming)
-	WatchDirectives(ctx context.Context, in *WatchDirectivesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CaptureDirective], error)
-	// Status reporting (spoke → hub)
+	DeregisterAgent(ctx context.Context, in *DeregisterAgentRequest, opts ...grpc.CallOption) (*DeregisterAgentResponse, error)
+	// Capture orchestration (hub → agent directives via server-streaming)
+	WatchDirectives(ctx context.Context, in *WatchDirectivesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDirectivesResponse], error)
+	// Status reporting (agent → hub)
 	ReportCaptureStatus(ctx context.Context, in *ReportCaptureStatusRequest, opts ...grpc.CallOption) (*ReportCaptureStatusResponse, error)
 	// Query API (for dashboards / CLI tooling)
 	ListCaptures(ctx context.Context, in *ListCapturesRequest, opts ...grpc.CallOption) (*ListCapturesResponse, error)
 	GetCaptureStatus(ctx context.Context, in *GetCaptureStatusRequest, opts ...grpc.CallOption) (*GetCaptureStatusResponse, error)
-	ListSpokes(ctx context.Context, in *ListSpokesRequest, opts ...grpc.CallOption) (*ListSpokesResponse, error)
+	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
 }
 
 type hubServiceClient struct {
@@ -57,10 +57,10 @@ func NewHubServiceClient(cc grpc.ClientConnInterface) HubServiceClient {
 	return &hubServiceClient{cc}
 }
 
-func (c *hubServiceClient) RegisterSpoke(ctx context.Context, in *RegisterSpokeRequest, opts ...grpc.CallOption) (*RegisterSpokeResponse, error) {
+func (c *hubServiceClient) RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RegisterSpokeResponse)
-	err := c.cc.Invoke(ctx, HubService_RegisterSpoke_FullMethodName, in, out, cOpts...)
+	out := new(RegisterAgentResponse)
+	err := c.cc.Invoke(ctx, HubService_RegisterAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,23 +77,23 @@ func (c *hubServiceClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, 
 	return out, nil
 }
 
-func (c *hubServiceClient) DeregisterSpoke(ctx context.Context, in *DeregisterSpokeRequest, opts ...grpc.CallOption) (*DeregisterSpokeResponse, error) {
+func (c *hubServiceClient) DeregisterAgent(ctx context.Context, in *DeregisterAgentRequest, opts ...grpc.CallOption) (*DeregisterAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeregisterSpokeResponse)
-	err := c.cc.Invoke(ctx, HubService_DeregisterSpoke_FullMethodName, in, out, cOpts...)
+	out := new(DeregisterAgentResponse)
+	err := c.cc.Invoke(ctx, HubService_DeregisterAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *hubServiceClient) WatchDirectives(ctx context.Context, in *WatchDirectivesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CaptureDirective], error) {
+func (c *hubServiceClient) WatchDirectives(ctx context.Context, in *WatchDirectivesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDirectivesResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &HubService_ServiceDesc.Streams[0], HubService_WatchDirectives_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[WatchDirectivesRequest, CaptureDirective]{ClientStream: stream}
+	x := &grpc.GenericClientStream[WatchDirectivesRequest, WatchDirectivesResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (c *hubServiceClient) WatchDirectives(ctx context.Context, in *WatchDirecti
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HubService_WatchDirectivesClient = grpc.ServerStreamingClient[CaptureDirective]
+type HubService_WatchDirectivesClient = grpc.ServerStreamingClient[WatchDirectivesResponse]
 
 func (c *hubServiceClient) ReportCaptureStatus(ctx context.Context, in *ReportCaptureStatusRequest, opts ...grpc.CallOption) (*ReportCaptureStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -136,10 +136,10 @@ func (c *hubServiceClient) GetCaptureStatus(ctx context.Context, in *GetCaptureS
 	return out, nil
 }
 
-func (c *hubServiceClient) ListSpokes(ctx context.Context, in *ListSpokesRequest, opts ...grpc.CallOption) (*ListSpokesResponse, error) {
+func (c *hubServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListSpokesResponse)
-	err := c.cc.Invoke(ctx, HubService_ListSpokes_FullMethodName, in, out, cOpts...)
+	out := new(ListAgentsResponse)
+	err := c.cc.Invoke(ctx, HubService_ListAgents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,20 +150,20 @@ func (c *hubServiceClient) ListSpokes(ctx context.Context, in *ListSpokesRequest
 // All implementations must embed UnimplementedHubServiceServer
 // for forward compatibility.
 //
-// HubService defines the gRPC API between the hub and spoke controllers.
+// HubService defines the gRPC API between the hub and agent controllers.
 type HubServiceServer interface {
-	// Spoke lifecycle
-	RegisterSpoke(context.Context, *RegisterSpokeRequest) (*RegisterSpokeResponse, error)
+	// Agent lifecycle
+	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
-	DeregisterSpoke(context.Context, *DeregisterSpokeRequest) (*DeregisterSpokeResponse, error)
-	// Capture orchestration (hub → spoke directives via server-streaming)
-	WatchDirectives(*WatchDirectivesRequest, grpc.ServerStreamingServer[CaptureDirective]) error
-	// Status reporting (spoke → hub)
+	DeregisterAgent(context.Context, *DeregisterAgentRequest) (*DeregisterAgentResponse, error)
+	// Capture orchestration (hub → agent directives via server-streaming)
+	WatchDirectives(*WatchDirectivesRequest, grpc.ServerStreamingServer[WatchDirectivesResponse]) error
+	// Status reporting (agent → hub)
 	ReportCaptureStatus(context.Context, *ReportCaptureStatusRequest) (*ReportCaptureStatusResponse, error)
 	// Query API (for dashboards / CLI tooling)
 	ListCaptures(context.Context, *ListCapturesRequest) (*ListCapturesResponse, error)
 	GetCaptureStatus(context.Context, *GetCaptureStatusRequest) (*GetCaptureStatusResponse, error)
-	ListSpokes(context.Context, *ListSpokesRequest) (*ListSpokesResponse, error)
+	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
 	mustEmbedUnimplementedHubServiceServer()
 }
 
@@ -174,16 +174,16 @@ type HubServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHubServiceServer struct{}
 
-func (UnimplementedHubServiceServer) RegisterSpoke(context.Context, *RegisterSpokeRequest) (*RegisterSpokeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RegisterSpoke not implemented")
+func (UnimplementedHubServiceServer) RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterAgent not implemented")
 }
 func (UnimplementedHubServiceServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Heartbeat not implemented")
 }
-func (UnimplementedHubServiceServer) DeregisterSpoke(context.Context, *DeregisterSpokeRequest) (*DeregisterSpokeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DeregisterSpoke not implemented")
+func (UnimplementedHubServiceServer) DeregisterAgent(context.Context, *DeregisterAgentRequest) (*DeregisterAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeregisterAgent not implemented")
 }
-func (UnimplementedHubServiceServer) WatchDirectives(*WatchDirectivesRequest, grpc.ServerStreamingServer[CaptureDirective]) error {
+func (UnimplementedHubServiceServer) WatchDirectives(*WatchDirectivesRequest, grpc.ServerStreamingServer[WatchDirectivesResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method WatchDirectives not implemented")
 }
 func (UnimplementedHubServiceServer) ReportCaptureStatus(context.Context, *ReportCaptureStatusRequest) (*ReportCaptureStatusResponse, error) {
@@ -195,8 +195,8 @@ func (UnimplementedHubServiceServer) ListCaptures(context.Context, *ListCaptures
 func (UnimplementedHubServiceServer) GetCaptureStatus(context.Context, *GetCaptureStatusRequest) (*GetCaptureStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCaptureStatus not implemented")
 }
-func (UnimplementedHubServiceServer) ListSpokes(context.Context, *ListSpokesRequest) (*ListSpokesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListSpokes not implemented")
+func (UnimplementedHubServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
 }
 func (UnimplementedHubServiceServer) mustEmbedUnimplementedHubServiceServer() {}
 func (UnimplementedHubServiceServer) testEmbeddedByValue()                    {}
@@ -219,20 +219,20 @@ func RegisterHubServiceServer(s grpc.ServiceRegistrar, srv HubServiceServer) {
 	s.RegisterService(&HubService_ServiceDesc, srv)
 }
 
-func _HubService_RegisterSpoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterSpokeRequest)
+func _HubService_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAgentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(HubServiceServer).RegisterSpoke(ctx, in)
+		return srv.(HubServiceServer).RegisterAgent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: HubService_RegisterSpoke_FullMethodName,
+		FullMethod: HubService_RegisterAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HubServiceServer).RegisterSpoke(ctx, req.(*RegisterSpokeRequest))
+		return srv.(HubServiceServer).RegisterAgent(ctx, req.(*RegisterAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -255,20 +255,20 @@ func _HubService_Heartbeat_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _HubService_DeregisterSpoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeregisterSpokeRequest)
+func _HubService_DeregisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeregisterAgentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(HubServiceServer).DeregisterSpoke(ctx, in)
+		return srv.(HubServiceServer).DeregisterAgent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: HubService_DeregisterSpoke_FullMethodName,
+		FullMethod: HubService_DeregisterAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HubServiceServer).DeregisterSpoke(ctx, req.(*DeregisterSpokeRequest))
+		return srv.(HubServiceServer).DeregisterAgent(ctx, req.(*DeregisterAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -278,11 +278,11 @@ func _HubService_WatchDirectives_Handler(srv interface{}, stream grpc.ServerStre
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(HubServiceServer).WatchDirectives(m, &grpc.GenericServerStream[WatchDirectivesRequest, CaptureDirective]{ServerStream: stream})
+	return srv.(HubServiceServer).WatchDirectives(m, &grpc.GenericServerStream[WatchDirectivesRequest, WatchDirectivesResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HubService_WatchDirectivesServer = grpc.ServerStreamingServer[CaptureDirective]
+type HubService_WatchDirectivesServer = grpc.ServerStreamingServer[WatchDirectivesResponse]
 
 func _HubService_ReportCaptureStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReportCaptureStatusRequest)
@@ -338,20 +338,20 @@ func _HubService_GetCaptureStatus_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _HubService_ListSpokes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListSpokesRequest)
+func _HubService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(HubServiceServer).ListSpokes(ctx, in)
+		return srv.(HubServiceServer).ListAgents(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: HubService_ListSpokes_FullMethodName,
+		FullMethod: HubService_ListAgents_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HubServiceServer).ListSpokes(ctx, req.(*ListSpokesRequest))
+		return srv.(HubServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -364,16 +364,16 @@ var HubService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*HubServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "RegisterSpoke",
-			Handler:    _HubService_RegisterSpoke_Handler,
+			MethodName: "RegisterAgent",
+			Handler:    _HubService_RegisterAgent_Handler,
 		},
 		{
 			MethodName: "Heartbeat",
 			Handler:    _HubService_Heartbeat_Handler,
 		},
 		{
-			MethodName: "DeregisterSpoke",
-			Handler:    _HubService_DeregisterSpoke_Handler,
+			MethodName: "DeregisterAgent",
+			Handler:    _HubService_DeregisterAgent_Handler,
 		},
 		{
 			MethodName: "ReportCaptureStatus",
@@ -388,8 +388,8 @@ var HubService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _HubService_GetCaptureStatus_Handler,
 		},
 		{
-			MethodName: "ListSpokes",
-			Handler:    _HubService_ListSpokes_Handler,
+			MethodName: "ListAgents",
+			Handler:    _HubService_ListAgents_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

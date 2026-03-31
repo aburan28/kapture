@@ -26,6 +26,7 @@ hub:
   service:
     type: ClusterIP
     port: 9443
+    dashboardPort: 8082
   tls:
     # -- Name of the TLS secret for the hub gRPC server
     secretName: ""
@@ -36,11 +37,11 @@ hub:
   # -- Tolerations for hub pods
   tolerations: []
 
-spoke:
-  # -- Enable the spoke controller
+agents:
+  # -- Enable the agents controller
   enabled: true
   image:
-    repository: kapture/spoke
+    repository: kapture/agents
     tag: "dev"
     pullPolicy: IfNotPresent
   replicas: 1
@@ -52,16 +53,16 @@ spoke:
       cpu: 100m
       memory: 128Mi
   serviceAccount:
-    # -- Create a ServiceAccount for the spoke
+    # -- Create a ServiceAccount for the agents controller
     create: true
-    # -- Annotations for the spoke ServiceAccount
+    # -- Annotations for the agents controller ServiceAccount
     annotations: {}
   hub:
     # -- gRPC address of the hub (e.g. hub-service.capture-system.svc:9443)
     address: ""
-  # -- Node selector for spoke pods
+  # -- Node selector for agents pods
   nodeSelector: {}
-  # -- Tolerations for spoke pods
+  # -- Tolerations for agents pods
   tolerations: []
 
 agent:
@@ -72,4 +73,3 @@ agent:
 
 # -- Namespace to deploy into (defaults to Release.Namespace)
 namespace: ""
-

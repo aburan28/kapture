@@ -15,8 +15,8 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.connectedSpokes
-      name: ConnectedSpokes
+    - jsonPath: .status.connectedAgents
+      name: ConnectedAgents
       type: integer
     - jsonPath: .status.activeCaptures
       name: ActiveCaptures
@@ -59,6 +59,8 @@ spec:
                 required:
                 - type
                 type: object
+              dashboardAddress:
+                type: string
               grpcAddress:
                 type: string
               tls:
@@ -127,12 +129,12 @@ spec:
               activeCaptures:
                 format: int32
                 type: integer
-              connectedSpokes:
+              connectedAgents:
                 format: int32
                 type: integer
-              spokes:
+              agents:
                 items:
-                  description: CaptureHubSpokeStatus summarizes an attached spoke
+                  description: CaptureHubAgentStatus summarizes an attached agent
                     cluster.
                   properties:
                     activeCaptures:
