@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -71,6 +72,19 @@ type AgentScalingSpec struct {
 	TargetCPU *int32 `json:"targetCPU,omitempty"`
 }
 
+// PayloadPluginRef references a named payload plugin to apply in the capture pipeline.
+type PayloadPluginRef struct {
+	// Name is the registered plugin name (e.g., "redact", "sample", "enrich").
+	Name string `json:"name"`
+	// +optional
+	// +kubebuilder:validation:Enum=drop;skip;abort
+	// +kubebuilder:default=drop
+	OnError *string `json:"onError,omitempty"`
+	// Config is plugin-specific configuration.
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
+}
+
 // TrafficCaptureSpec defines the desired state of TrafficCapture.
 type TrafficCaptureSpec struct {
 	TargetRef  gwapiv1.LocalPolicyTargetReference `json:"targetRef"`
@@ -80,6 +94,11 @@ type TrafficCaptureSpec struct {
 	Filters *CaptureFilters `json:"filters,omitempty"`
 	// +optional
 	Agent *AgentScalingSpec `json:"agent,omitempty"`
+	// Plugins are payload processing plugins applied in order between
+	// capture and storage. Each plugin can transform, filter, or observe
+	// captured requests.
+	// +optional
+	Plugins []PayloadPluginRef `json:"plugins,omitempty"`
 }
 
 // CaptureAgentStatus summarizes the deployed capture agents.
