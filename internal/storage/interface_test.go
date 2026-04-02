@@ -317,7 +317,7 @@ func TestNewCloudObjectName_EmptyPrefix(t *testing.T) {
 // newFilesystemObjectName tests
 // ---------------------------------------------------------------------------
 
-func TestNewFilesystemObjectName(t *testing.T) {
+func TestNewFilesystemObjectName_PathComponents(t *testing.T) {
 	ts := time.Date(2026, 4, 2, 8, 0, 0, 0, time.UTC)
 	fn := newFilesystemObjectName("/mnt/capture", "cap-456", "worker-pod")
 	got := fn(ts, 3)
@@ -391,7 +391,7 @@ func TestBufferedObjectWriter_WriteAndFlush(t *testing.T) {
 	}
 }
 
-func TestBufferedObjectWriter_AutoFlushOnSize(t *testing.T) {
+func TestBufferedObjectWriter_AutoFlushOnSizeExceeded(t *testing.T) {
 	// Use a very small buffer size so a single write exceeds it.
 	w, uploads := newTestWriter(10, time.Hour)
 
@@ -461,7 +461,7 @@ func TestBufferedObjectWriter_FlushAfterClose(t *testing.T) {
 	}
 }
 
-func TestBufferedObjectWriter_CloseIdempotent(t *testing.T) {
+func TestBufferedObjectWriter_CloseIdempotentWithData(t *testing.T) {
 	w, uploads := newTestWriter(10*1024*1024, time.Hour)
 
 	// Write some data so the first close actually flushes.
