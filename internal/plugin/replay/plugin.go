@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kapture-io/kapture/internal/plugin/validation"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -169,12 +170,15 @@ type Summary struct {
 }
 
 // Registry is a named collection of plugin constructors for replay components.
+// It embeds a [validation.Registry] for cross-plugin constraint validation
+// of transformer pipelines.
 type Registry struct {
 	mu           sync.RWMutex
 	readers      map[string]ReaderBuilder
 	senders      map[string]SenderBuilder
 	transformers map[string]TransformerBuilder
 	handlers     map[string]ResultHandlerBuilder
+	Validation   *validation.Registry
 }
 
 // Builder function types for each component.
@@ -185,13 +189,15 @@ type (
 	ResultHandlerBuilder func(ctx context.Context, config map[string]any) (ResultHandler, error)
 )
 
-// NewRegistry creates an empty replay plugin registry.
+// NewRegistry creates an empty replay plugin registry with an embedded
+// validation registry for transformer constraint checking.
 func NewRegistry() *Registry {
 	return &Registry{
 		readers:      make(map[string]ReaderBuilder),
 		senders:      make(map[string]SenderBuilder),
 		transformers: make(map[string]TransformerBuilder),
 		handlers:     make(map[string]ResultHandlerBuilder),
+		Validation:   validation.NewRegistry(),
 	}
 }
 
@@ -226,6 +232,29 @@ func (r *Registry) RegisterTransformer(name string, builder TransformerBuilder) 
 	}
 	r.transformers[name] = builder
 	return nil
+}
+
+// RegisterTransformerWithConstraints adds a Transformer builder and its
+// validation constraints. Use this for transformers that declare cross-cutting
+// concerns (conflicts, ordering, resource claims).
+func (r *Registry) RegisterTransformerWithConstraints(name string, builder TransformerBuilder, constraints *validation.Constraints) error {
+	if err := r.RegisterTransformer(name, builder); err != nil {
+		return err
+	}
+	if err := r.Validation.Register(name, constraints); err != nil {
+		// Roll back the transformer registration on constraint failure.
+		r.mu.Lock()
+		delete(r.transformers, name)
+		r.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// ValidateTransformerPipeline checks an ordered list of transformer references
+// against all registered constraints. Returns nil if the pipeline is valid.
+func (r *Registry) ValidateTransformerPipeline(refs []validation.PluginRef) []*validation.ValidationError {
+	return r.Validation.ValidatePipeline(refs)
 }
 
 // RegisterResultHandler adds a ResultHandler builder under the given name.
