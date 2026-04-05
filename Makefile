@@ -17,6 +17,7 @@ docker-build:
 	docker build -f Dockerfile.hub -t kapture/hub:dev .
 	docker build -f Dockerfile.spoke -t kapture/spoke:dev .
 	docker build -f Dockerfile.agent -t kapture/agent:dev .
+	docker build -f Dockerfile.replay -t kapture/replay-engine:dev .
 
 lint:
 	@echo "TODO: run golangci-lint once packages are implemented"
