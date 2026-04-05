@@ -31,6 +31,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/kapture-io/kapture/internal/plugin/validation"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -195,18 +196,23 @@ func (p *Pipeline) Close() error {
 
 // Registry is a named collection of plugin constructors. It allows plugins
 // to be registered by name and instantiated from configuration at runtime.
+// It embeds a [validation.Registry] for cross-plugin constraint validation.
 type Registry struct {
-	mu       sync.RWMutex
-	builders map[string]Builder
+	mu         sync.RWMutex
+	builders   map[string]Builder
+	Validation *validation.Registry
 }
 
 // Builder constructs a Plugin from configuration. This is the function
 // signature that plugin authors implement and register.
 type Builder func(ctx context.Context, config map[string]any) (Plugin, error)
 
-// NewRegistry creates an empty plugin registry.
+// NewRegistry creates an empty plugin registry with an embedded validation registry.
 func NewRegistry() *Registry {
-	return &Registry{builders: make(map[string]Builder)}
+	return &Registry{
+		builders:   make(map[string]Builder),
+		Validation: validation.NewRegistry(),
+	}
 }
 
 // Register adds a plugin builder under the given name.
@@ -220,6 +226,29 @@ func (r *Registry) Register(name string, builder Builder) error {
 	}
 	r.builders[name] = builder
 	return nil
+}
+
+// RegisterWithConstraints adds a plugin builder and its validation constraints.
+// This is the preferred registration method for plugins that declare cross-cutting
+// concerns (conflicts, ordering, resource claims).
+func (r *Registry) RegisterWithConstraints(name string, builder Builder, constraints *validation.Constraints) error {
+	if err := r.Register(name, builder); err != nil {
+		return err
+	}
+	if err := r.Validation.Register(name, constraints); err != nil {
+		// Roll back the builder registration on constraint failure.
+		r.mu.Lock()
+		delete(r.builders, name)
+		r.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// ValidatePipeline checks an ordered list of plugin references against all
+// registered constraints. Returns nil if the pipeline is valid.
+func (r *Registry) ValidatePipeline(refs []validation.PluginRef) []*validation.ValidationError {
+	return r.Validation.ValidatePipeline(refs)
 }
 
 // Build creates a plugin instance by name with the given config.
