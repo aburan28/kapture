@@ -12,7 +12,10 @@ import (
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
-// helper to build a FeedServer with a started reader for handler testing.
+// newTestFeedServer creates a FeedServer with the reader opened and readLoop
+// running, but WITHOUT starting the HTTP listener. Tests call handlers directly
+// via httptest, so the listener isn't needed and avoids port conflicts between
+// sequential tests.
 func newTestFeedServer(t *testing.T, reqs []*storage.CapturedRequest) *FeedServer {
 	t.Helper()
 	reader := &mockReader{requests: reqs}
@@ -25,12 +28,23 @@ func newTestFeedServer(t *testing.T, reqs []*storage.CapturedRequest) *FeedServe
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
-	if err := server.Start(ctx); err != nil {
+	// Open the reader and start the readLoop directly, bypassing the HTTP
+	// listener that Start() would also spin up.
+	if err := reader.Open(ctx, server.readOpts); err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { server.Stop(context.Background()) })
+	server.startTime = time.Now()
+	innerCtx, innerCancel := context.WithCancel(ctx)
+	server.cancelFn = innerCancel
+	go server.readLoop(innerCtx)
+
+	t.Cleanup(func() {
+		cancel()
+		innerCancel()
+		reader.Close()
+	})
 
 	// Wait for reader to fill buffer.
 	time.Sleep(100 * time.Millisecond)
