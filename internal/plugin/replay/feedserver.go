@@ -248,29 +248,7 @@ func (s *FeedServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 		n = 1000
 	}
 
-	batch := make([]*storage.CapturedRequest, 0, n)
-	for i := 0; i < n; i++ {
-		select {
-		case req, ok := <-s.reqCh:
-			if !ok {
-				goto respond
-			}
-			batch = append(batch, req)
-		default:
-			// Non-blocking: return what we have if buffer is empty.
-			if len(batch) > 0 {
-				goto respond
-			}
-			// First item: block until one is available.
-			req, ok := <-s.reqCh
-			if !ok {
-				goto respond
-			}
-			batch = append(batch, req)
-		}
-	}
-
-respond:
+	batch := s.collectBatch(n)
 	s.served.Add(int64(len(batch)))
 
 	if len(batch) == 0 {
@@ -284,6 +262,34 @@ respond:
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(batch)
+}
+
+// collectBatch reads up to n requests from the channel. It blocks for the
+// first request but returns immediately if the buffer is empty after that.
+func (s *FeedServer) collectBatch(n int) []*storage.CapturedRequest {
+	batch := make([]*storage.CapturedRequest, 0, n)
+	for i := 0; i < n; i++ {
+		if i == 0 {
+			// First request: block until available.
+			req, ok := <-s.reqCh
+			if !ok {
+				return batch
+			}
+			batch = append(batch, req)
+		} else {
+			// Subsequent requests: non-blocking drain.
+			select {
+			case req, ok := <-s.reqCh:
+				if !ok {
+					return batch
+				}
+				batch = append(batch, req)
+			default:
+				return batch
+			}
+		}
+	}
+	return batch
 }
 
 type feedStatus struct {
