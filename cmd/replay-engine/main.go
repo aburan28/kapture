@@ -150,8 +150,8 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 	}
 
 	// Validate --resume requires --replay-id to find the right checkpoint.
-	if cfg.resume && cfg.replayID == "" {
-		return fmt.Errorf("--resume requires --replay-id to locate the checkpoint")
+	if cfg.resume {
+		return fmt.Errorf("--resume is not yet implemented: checkpoint state is recorded but reader seek-to-position is not wired up; track progress via checkpoints and manually set --start-time on restart")
 	}
 
 	// Generate replay ID if not provided.
@@ -242,23 +242,6 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 		return fmt.Errorf("create checkpointer: %w", err)
 	}
 
-	// Check for existing checkpoint if --resume.
-	var existingCheckpoint *replay.Checkpoint
-	if cfg.resume {
-		existingCheckpoint, err = checkpointer.Load(cfg.replayID)
-		if err != nil {
-			return fmt.Errorf("load checkpoint: %w", err)
-		}
-		if existingCheckpoint != nil {
-			logger.Info("resuming from checkpoint",
-				"requestsSent", existingCheckpoint.RequestsSent,
-				"lastObject", existingCheckpoint.LastObjectKey)
-		} else {
-			logger.Warn("no checkpoint found for replay ID, starting from beginning",
-				"replayId", cfg.replayID)
-		}
-	}
-
 	// Build read options.
 	readOpts, err := buildReadOptions(cfg)
 	if err != nil {
@@ -302,12 +285,6 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 			Concurrency:   cfg.concurrency,
 			StorageType:   cfg.storageType,
 		},
-	}
-	if existingCheckpoint != nil {
-		cp.RequestsSent = existingCheckpoint.RequestsSent
-		cp.RequestsErrored = existingCheckpoint.RequestsErrored
-		cp.RequestsFiltered = existingCheckpoint.RequestsFiltered
-		cp.StartTime = existingCheckpoint.StartTime
 	}
 	checkpointer.Start(cp)
 
