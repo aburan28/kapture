@@ -62,12 +62,17 @@ type FeedServerConfig struct {
 // NewFeedServer creates an HTTP server that feeds requests to external consumers.
 // Only RateModeOriginalTiming and RateModeUnlimited are supported; constant-rate
 // pacing should be handled by the external load generator (e.g., k6 VU count).
+// The zero value of RateMode (RateModeConstant) is treated as RateModeUnlimited.
 func NewFeedServer(cfg FeedServerConfig) (*FeedServer, error) {
 	if cfg.Reader == nil {
 		return nil, fmt.Errorf("reader is required")
 	}
+	// The zero value of RateMode is RateModeConstant (iota=0). Treat it as
+	// unlimited when no explicit mode is set. Only reject explicit constant-rate
+	// configuration (RateModeConstant with a non-zero RatePerSecond would be
+	// set via the Engine, not the FeedServer).
 	if cfg.RateMode == RateModeConstant {
-		return nil, fmt.Errorf("RateModeConstant is not supported by FeedServer; use the replay Engine directly or control rate via the external load generator")
+		cfg.RateMode = RateModeUnlimited
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = ":6565"

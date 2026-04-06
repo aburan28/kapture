@@ -216,13 +216,18 @@ func TestFeedServer_NilReaderError(t *testing.T) {
 	}
 }
 
-func TestFeedServer_ConstantRateRejected(t *testing.T) {
-	_, err := NewFeedServer(FeedServerConfig{
+func TestFeedServer_ConstantRateTreatedAsUnlimited(t *testing.T) {
+	// RateModeConstant is the zero value (iota=0). FeedServer should silently
+	// treat it as RateModeUnlimited rather than rejecting it.
+	server, err := NewFeedServer(FeedServerConfig{
 		Reader:   &mockReader{requests: testRequests(1)},
 		RateMode: RateModeConstant,
 	})
-	if err == nil {
-		t.Error("expected error for RateModeConstant")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if server.rateMode != RateModeUnlimited {
+		t.Errorf("expected RateModeUnlimited, got %d", server.rateMode)
 	}
 }
 
