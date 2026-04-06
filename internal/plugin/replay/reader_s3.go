@@ -227,7 +227,10 @@ func (r *S3Reader) openObject(ctx context.Context, key string) error {
 	}
 
 	r.scanner = bufio.NewScanner(r.gzReader)
-	// Allow up to 10MB per line for large request bodies.
+	// Allow up to 10MB per JSONL line. The capture agent's MaxBodyBytes
+	// defaults to 1MB, so 10MB provides generous headroom for headers,
+	// metadata, and base64 encoding overhead. Lines exceeding this limit
+	// will cause a scanner error for that object.
 	r.scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	return nil
 }

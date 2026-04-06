@@ -137,6 +137,14 @@ export default function () {
   const batch = fetchBatch();
 
   if (batch === null) {
+    // Flush any remaining un-acked requests before stopping.
+    if (vuAckCounter > 0) {
+      http.post(`${FEED_URL}/ack`, JSON.stringify({ count: vuAckCounter }), {
+        headers: { 'Content-Type': 'application/json' },
+        tags: { name: 'feed_ack' },
+      });
+      vuAckCounter = 0;
+    }
     sleep(5);
     return;
   }

@@ -261,10 +261,14 @@ func (e *Engine) sendLoop(ctx context.Context, in <-chan *storage.CapturedReques
 		result, err := e.sender.Send(ctx, req)
 		if err != nil {
 			e.errors.Add(1)
-			result = &Result{
-				RequestID: req.ID,
-				Error:     err,
-				Timestamp: time.Now().UTC(),
+			// Use the sender's Result if available (preserves Duration, etc.),
+			// otherwise create a minimal one.
+			if result == nil {
+				result = &Result{
+					RequestID: req.ID,
+					Error:     err,
+					Timestamp: time.Now().UTC(),
+				}
 			}
 		} else {
 			e.sent.Add(1)

@@ -221,20 +221,24 @@ func (s *FeedServer) readLoop(ctx context.Context) {
 }
 
 func (s *FeedServer) handleNext(w http.ResponseWriter, r *http.Request) {
-	req, ok := <-s.reqCh
-	if !ok {
-		// Channel closed — replay is complete.
-		if errVal := s.readErr.Load(); errVal != nil {
-			http.Error(w, fmt.Sprintf("reader error: %v", errVal), http.StatusInternalServerError)
+	// Use select to respect client cancellation and avoid consuming a request
+	// that can't be delivered (the client may have disconnected).
+	select {
+	case req, ok := <-s.reqCh:
+		if !ok {
+			if errVal := s.readErr.Load(); errVal != nil {
+				http.Error(w, fmt.Sprintf("reader error: %v", errVal), http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "replay complete", http.StatusGone)
 			return
 		}
-		http.Error(w, "replay complete", http.StatusGone)
-		return
+		s.served.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(req)
+	case <-r.Context().Done():
+		http.Error(w, "client disconnected", http.StatusRequestTimeout)
 	}
-
-	s.served.Add(1)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
 }
 
 func (s *FeedServer) handleBatch(w http.ResponseWriter, r *http.Request) {

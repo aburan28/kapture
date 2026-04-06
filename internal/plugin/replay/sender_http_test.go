@@ -177,16 +177,23 @@ func TestHTTPSender_ConnectionError(t *testing.T) {
 	}
 
 	result, err := sender.Send(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	// Connection errors are captured in the result.
+	// Transport failures return both a Result (with Duration) and a Go error
+	// so the engine's sendLoop correctly increments its error counter.
+	if err == nil {
+		t.Error("expected non-nil error for connection failure")
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result even on transport failure")
+	}
 	if result.Error == nil {
-		t.Error("expected error for connection failure")
+		t.Error("expected Result.Error for connection failure")
 	}
 	if result.StatusCode != 0 {
 		t.Errorf("expected 0 status for connection error, got %d", result.StatusCode)
+	}
+	if result.Duration <= 0 {
+		t.Error("expected positive duration even on failure")
 	}
 }
 

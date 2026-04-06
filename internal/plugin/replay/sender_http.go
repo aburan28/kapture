@@ -105,12 +105,14 @@ func (s *HTTPSender) Send(ctx context.Context, req *storage.CapturedRequest) (*R
 	duration := time.Since(start)
 
 	if err != nil {
+		// Return the error both in the Result and as the function error so the
+		// engine's sendLoop correctly increments its error counter.
 		return &Result{
 			RequestID: req.ID,
 			Duration:  duration,
 			Error:     err,
 			Timestamp: time.Now().UTC(),
-		}, nil
+		}, err
 	}
 	defer resp.Body.Close()
 

@@ -172,7 +172,11 @@ export default function () {
 
   // Feed exhausted — signal k6 to stop.
   if (batch === null) {
-    // Sleep briefly to let other VUs finish.
+    // Flush any remaining un-acked requests before stopping.
+    if (vuAckCounter > 0) {
+      acknowledgeRequests(vuAckCounter);
+      vuAckCounter = 0;
+    }
     sleep(2);
     return;
   }
