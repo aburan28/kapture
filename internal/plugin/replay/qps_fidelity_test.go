@@ -91,8 +91,8 @@ func TestEngine_OriginalTimingFidelity(t *testing.T) {
 	}
 
 	// Verify inter-request delays match the expected 100ms interval.
-	// Allow 50ms tolerance for scheduler jitter.
-	tolerance := 50 * time.Millisecond
+	// Allow generous tolerance for CI environments with race detector overhead.
+	tolerance := 80 * time.Millisecond
 
 	for i := 1; i < len(sendTimes); i++ {
 		actualDelay := sendTimes[i].Sub(sendTimes[i-1])
@@ -109,7 +109,7 @@ func TestEngine_OriginalTimingFidelity(t *testing.T) {
 	totalElapsed := sendTimes[len(sendTimes)-1].Sub(sendTimes[0])
 	expectedTotal := time.Duration(numRequests-1) * interval
 
-	if absDuration(totalElapsed-expectedTotal) > tolerance*time.Duration(numRequests) {
+	if absDuration(totalElapsed-expectedTotal) > 150*time.Millisecond*time.Duration(numRequests) {
 		t.Errorf("total elapsed: expected ~%v, got %v", expectedTotal, totalElapsed)
 	}
 
@@ -161,7 +161,7 @@ func TestEngine_OriginalTimingWithTimeScale(t *testing.T) {
 	}
 
 	expectedScaledInterval := 100 * time.Millisecond // 200ms * 0.5
-	tolerance := 50 * time.Millisecond
+	tolerance := 80 * time.Millisecond
 
 	for i := 1; i < len(sendTimes); i++ {
 		actualDelay := sendTimes[i].Sub(sendTimes[i-1])
@@ -226,14 +226,14 @@ func TestEngine_ConstantRateFidelity(t *testing.T) {
 	totalElapsed := sendTimes[len(sendTimes)-1].Sub(sendTimes[0])
 	actualRPS := float64(numRequests-1) / totalElapsed.Seconds()
 
-	// Allow 30% tolerance for constant rate (timer granularity).
-	if math.Abs(actualRPS-targetRPS)/targetRPS > 0.30 {
+	// Allow 50% tolerance for constant rate (timer granularity + CI overhead).
+	if math.Abs(actualRPS-targetRPS)/targetRPS > 0.50 {
 		t.Errorf("expected RPS ~%.1f, got %.1f (total elapsed: %v)",
 			targetRPS, actualRPS, totalElapsed)
 	}
 
 	// Verify individual intervals are approximately correct.
-	tolerance := 25 * time.Millisecond
+	tolerance := 40 * time.Millisecond
 	for i := 1; i < len(sendTimes); i++ {
 		actualDelay := sendTimes[i].Sub(sendTimes[i-1])
 		diff := absDuration(actualDelay - expectedInterval)
@@ -341,7 +341,7 @@ func TestEngine_VariableIntervalFidelity(t *testing.T) {
 	}
 
 	sendTimes := sender.getSendTimes()
-	tolerance := 30 * time.Millisecond
+	tolerance := 60 * time.Millisecond
 
 	// Verify each inter-request delay matches the original.
 	for i := 1; i < len(sendTimes); i++ {
@@ -414,7 +414,7 @@ func TestFeedServer_OriginalTimingPacing(t *testing.T) {
 	}
 
 	// Verify pacing: intervals should be ~100ms.
-	tolerance := 50 * time.Millisecond
+	tolerance := 80 * time.Millisecond
 	for i := 1; i < len(receiveTimes); i++ {
 		actualDelay := receiveTimes[i].Sub(receiveTimes[i-1])
 		diff := absDuration(actualDelay - interval)

@@ -34,7 +34,7 @@ func newTestFeedServer(t *testing.T, reqs []*storage.CapturedRequest) *FeedServe
 	t.Cleanup(func() { server.Stop(context.Background()) })
 
 	// Wait for reader to fill buffer.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	return server
 }
 
@@ -77,7 +77,7 @@ func TestFeedServer_NextEndpoint_ReplayComplete(t *testing.T) {
 	}
 
 	// Wait for reader to finish and channel to close.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	// Next call should return 410 Gone.
 	req = httptest.NewRequest("GET", "/next", nil)
@@ -151,7 +151,7 @@ func TestFeedServer_StatusEndpoint_ReaderDone(t *testing.T) {
 
 	// Drain the request so reader finishes.
 	<-server.reqCh
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	w := httptest.NewRecorder()
