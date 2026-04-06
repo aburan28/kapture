@@ -93,10 +93,10 @@ func (r *FilesystemReader) Next(ctx context.Context) (*storage.CapturedRequest, 
 			if !matchesReadOptions(req, r.opts) {
 				continue
 			}
-			r.totalRead++
-			if r.opts.Limit > 0 && r.totalRead > r.opts.Limit {
+			if r.opts.Limit > 0 && r.totalRead >= r.opts.Limit {
 				return nil, ErrReaderDone
 			}
+			r.totalRead++
 			return req, nil
 		}
 
@@ -146,7 +146,7 @@ func (r *FilesystemReader) listFiles(basePath string, opts ReadOptions) ([]strin
 		if !strings.HasSuffix(path, ".jsonl.gz") {
 			return nil
 		}
-		if filterObjectByTime(path, opts.StartTime, opts.EndTime) {
+		if filterObjectByTime(filepath.ToSlash(path), opts.StartTime, opts.EndTime) {
 			files = append(files, path)
 		}
 		return nil

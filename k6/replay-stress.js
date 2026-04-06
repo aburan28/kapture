@@ -13,6 +13,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend, Gauge } from 'k6/metrics';
+import encoding from 'k6/encoding';
 
 const FEED_URL = __ENV.FEED_URL || 'http://localhost:6565';
 const TARGET_URL = __ENV.TARGET_URL || 'http://localhost:8080';
@@ -103,7 +104,8 @@ function replayRequest(captured) {
 
   let body = null;
   if (captured.body && method !== 'GET' && method !== 'HEAD') {
-    body = captured.body;
+    // Go's json.Marshal encodes []byte as base64. Decode to get original bytes.
+    body = encoding.b64decode(captured.body, 'std', 's');
   }
 
   return http.request(method, url, body, params);

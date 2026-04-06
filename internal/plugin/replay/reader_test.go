@@ -22,7 +22,10 @@ func writeJSONLGZ(t *testing.T, path string, requests []*storage.CapturedRequest
 	}
 	var buf bytes.Buffer
 	for _, req := range requests {
-		line, _ := json.Marshal(req)
+		line, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}

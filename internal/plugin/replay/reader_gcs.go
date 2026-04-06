@@ -100,10 +100,10 @@ func (r *GCSReader) Next(ctx context.Context) (*storage.CapturedRequest, error) 
 			if !matchesReadOptions(req, r.opts) {
 				continue
 			}
-			r.totalRead++
-			if r.opts.Limit > 0 && r.totalRead > r.opts.Limit {
+			if r.opts.Limit > 0 && r.totalRead >= r.opts.Limit {
 				return nil, ErrReaderDone
 			}
+			r.totalRead++
 			return req, nil
 		}
 

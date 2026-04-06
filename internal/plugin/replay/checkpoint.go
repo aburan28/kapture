@@ -227,8 +227,22 @@ func (c *Checkpointer) writeCheckpoint(cp *Checkpoint) error {
 	path := c.checkpointPath(cp.ReplayID)
 	tmpPath := path + ".tmp"
 
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("create checkpoint tmp: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
 		return fmt.Errorf("write checkpoint tmp: %w", err)
+	}
+	// Fsync to ensure data is persisted before rename, so the checkpoint
+	// survives a crash or power loss.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("fsync checkpoint tmp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close checkpoint tmp: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename checkpoint: %w", err)
@@ -246,16 +260,21 @@ func (c *Checkpointer) checkpointPath(replayID string) string {
 }
 
 // CheckpointResultHandler wraps a ResultHandler and updates the Checkpointer
-// on every successful result. This integrates checkpointing into the replay
-// engine without modifying engine code.
+// on every result. This integrates checkpointing into the replay engine
+// without modifying engine code.
 type CheckpointResultHandler struct {
 	inner        ResultHandler
 	checkpointer *Checkpointer
+	startTime    time.Time
 }
 
 // NewCheckpointResultHandler wraps an inner ResultHandler to also track progress.
 func NewCheckpointResultHandler(inner ResultHandler, checkpointer *Checkpointer) *CheckpointResultHandler {
-	return &CheckpointResultHandler{inner: inner, checkpointer: checkpointer}
+	return &CheckpointResultHandler{
+		inner:        inner,
+		checkpointer: checkpointer,
+		startTime:    time.Now(),
+	}
 }
 
 func (h *CheckpointResultHandler) HandleResult(ctx context.Context, result *Result) error {
@@ -269,10 +288,27 @@ func (h *CheckpointResultHandler) HandleResult(ctx context.Context, result *Resu
 		} else {
 			cp.RequestsSent++
 			cp.LastRequestID = result.RequestID
+			cp.BytesProcessed += int64(len(result.ResponseBody))
 		}
+		cp.ElapsedDuration = time.Since(h.startTime)
 	})
 
 	return nil
+}
+
+// UpdateObjectKey should be called by the engine when advancing to a new
+// storage object, to record the last fully consumed object for resume.
+func (h *CheckpointResultHandler) UpdateObjectKey(key string) {
+	h.checkpointer.Update(func(cp *Checkpoint) {
+		cp.LastObjectKey = key
+	})
+}
+
+// IncrementFiltered records filtered/skipped requests in the checkpoint.
+func (h *CheckpointResultHandler) IncrementFiltered(n int64) {
+	h.checkpointer.Update(func(cp *Checkpoint) {
+		cp.RequestsFiltered += n
+	})
 }
 
 func (h *CheckpointResultHandler) Summarize(ctx context.Context) (*Summary, error) {

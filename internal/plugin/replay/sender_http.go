@@ -80,8 +80,12 @@ func (s *HTTPSender) Send(ctx context.Context, req *storage.CapturedRequest) (*R
 		return nil, fmt.Errorf("create http request: %w", err)
 	}
 
-	// Copy captured headers.
+	// Copy captured headers, skipping hop-by-hop headers that should not
+	// be forwarded and Host (set by net/http from the URL).
 	for k, vals := range req.Headers {
+		if isHopByHopHeader(k) {
+			continue
+		}
 		for _, v := range vals {
 			httpReq.Header.Add(k, v)
 		}
@@ -110,16 +114,21 @@ func (s *HTTPSender) Send(ctx context.Context, req *storage.CapturedRequest) (*R
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, s.maxResponseBody))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, s.maxResponseBody))
 
-	return &Result{
+	result := &Result{
 		RequestID:       req.ID,
 		StatusCode:      resp.StatusCode,
 		ResponseHeaders: resp.Header,
 		ResponseBody:    respBody,
 		Duration:        duration,
 		Timestamp:       time.Now().UTC(),
-	}, nil
+	}
+	if readErr != nil {
+		result.Error = fmt.Errorf("read response body: %w", readErr)
+	}
+
+	return result, nil
 }
 
 func (s *HTTPSender) Close() error {
@@ -129,3 +138,22 @@ func (s *HTTPSender) Close() error {
 
 // Verify HTTPSender implements Sender.
 var _ Sender = (*HTTPSender)(nil)
+
+// hopByHopHeaders are HTTP/1.1 hop-by-hop headers that must not be forwarded
+// by proxies or replay engines. Host is also excluded because net/http sets it
+// from the request URL, and Content-Length is best left for net/http to compute.
+var hopByHopHeaders = map[string]bool{
+	"Connection":       true,
+	"Keep-Alive":       true,
+	"Proxy-Connection": true,
+	"Transfer-Encoding": true,
+	"TE":               true,
+	"Trailer":          true,
+	"Upgrade":          true,
+	"Host":             true,
+	"Content-Length":   true,
+}
+
+func isHopByHopHeader(name string) bool {
+	return hopByHopHeaders[http.CanonicalHeaderKey(name)]
+}

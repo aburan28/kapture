@@ -3,137 +3,226 @@ package replay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
-func TestFeedServer_NextEndpoint(t *testing.T) {
-	reqs := testRequests(3)
+// helper to build a FeedServer with a started reader for handler testing.
+func newTestFeedServer(t *testing.T, reqs []*storage.CapturedRequest) *FeedServer {
+	t.Helper()
 	reader := &mockReader{requests: reqs}
-
 	server, err := NewFeedServer(FeedServerConfig{
 		Reader:     reader,
-		Addr:       ":0", // will be overridden by test
-		BufferSize: 10,
+		BufferSize: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 
-	// Start server in background.
 	if err := server.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer server.Stop(context.Background())
+	t.Cleanup(func() { server.Stop(context.Background()) })
 
 	// Wait for reader to fill buffer.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	return server
+}
 
-	// Verify requests are served via channel.
+func TestFeedServer_NextEndpoint(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(3))
+
+	// Make HTTP requests to /next via the handler directly.
 	for i := 0; i < 3; i++ {
-		select {
-		case req := <-server.reqCh:
-			if req == nil {
-				t.Fatal("expected non-nil request")
-			}
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for request")
+		req := httptest.NewRequest("GET", "/next", nil)
+		w := httptest.NewRecorder()
+		server.handleNext(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("iteration %d: expected 200, got %d: %s", i, w.Code, w.Body.String())
 		}
+
+		var captured storage.CapturedRequest
+		if err := json.NewDecoder(w.Body).Decode(&captured); err != nil {
+			t.Fatalf("iteration %d: failed to decode response: %v", i, err)
+		}
+		if captured.ID == "" {
+			t.Errorf("iteration %d: expected non-empty ID", i)
+		}
+	}
+
+	if server.served.Load() != 3 {
+		t.Errorf("expected 3 served, got %d", server.served.Load())
+	}
+}
+
+func TestFeedServer_NextEndpoint_ReplayComplete(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(1))
+
+	// Drain the one request.
+	req := httptest.NewRequest("GET", "/next", nil)
+	w := httptest.NewRecorder()
+	server.handleNext(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Wait for reader to finish and channel to close.
+	time.Sleep(50 * time.Millisecond)
+
+	// Next call should return 410 Gone.
+	req = httptest.NewRequest("GET", "/next", nil)
+	w = httptest.NewRecorder()
+	server.handleNext(w, req)
+	if w.Code != http.StatusGone {
+		t.Errorf("expected 410 Gone, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 func TestFeedServer_BatchEndpoint(t *testing.T) {
-	reqs := testRequests(10)
-	reader := &mockReader{requests: reqs}
+	server := newTestFeedServer(t, testRequests(10))
 
-	server, err := NewFeedServer(FeedServerConfig{
-		Reader:     reader,
-		BufferSize: 20,
-	})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest("GET", "/batch?n=5", nil)
+	w := httptest.NewRecorder()
+	server.handleBatch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := server.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer server.Stop(context.Background())
-
-	// Wait for buffer to fill.
-	time.Sleep(100 * time.Millisecond)
-
-	// Drain batch from channel manually (simulating HTTP batch).
-	batch := make([]*storage.CapturedRequest, 0, 5)
-	for i := 0; i < 5; i++ {
-		select {
-		case req := <-server.reqCh:
-			if req != nil {
-				batch = append(batch, req)
-			}
-		case <-time.After(time.Second):
-			break
-		}
+	var batch []*storage.CapturedRequest
+	if err := json.NewDecoder(w.Body).Decode(&batch); err != nil {
+		t.Fatalf("failed to decode batch: %v", err)
 	}
 
-	if len(batch) < 1 {
-		t.Fatal("expected at least 1 request in batch")
+	if len(batch) == 0 {
+		t.Fatal("expected non-empty batch")
+	}
+	if len(batch) > 5 {
+		t.Errorf("expected at most 5 requests, got %d", len(batch))
+	}
+}
+
+func TestFeedServer_BatchEndpoint_Clamp(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(5))
+
+	// Request more than 1000 — should be clamped.
+	req := httptest.NewRequest("GET", "/batch?n=2000", nil)
+	w := httptest.NewRecorder()
+	server.handleBatch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
 
 func TestFeedServer_StatusEndpoint(t *testing.T) {
-	reqs := testRequests(5)
-	reader := &mockReader{requests: reqs}
+	server := newTestFeedServer(t, testRequests(5))
 
-	server, err := NewFeedServer(FeedServerConfig{
-		Reader:     reader,
-		BufferSize: 10,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := httptest.NewRequest("GET", "/status", nil)
+	w := httptest.NewRecorder()
+	server.handleStatus(w, req)
 
-	// Verify the feedStatus struct marshals correctly.
-	status := feedStatus{
-		Served:    100,
-		Acked:     90,
-		BufferLen: 5,
-		BufferCap: 10,
-		Elapsed:   time.Minute,
-		CurrentRPS: 50.5,
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	data, err := json.Marshal(status)
-	if err != nil {
-		t.Fatal(err)
+	var status feedStatus
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("failed to decode status: %v", err)
 	}
 
-	var decoded feedStatus
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
+	if status.BufferCap != 100 {
+		t.Errorf("expected buffer cap 100, got %d", status.BufferCap)
 	}
+}
 
-	if decoded.Served != 100 {
-		t.Errorf("expected served=100, got %d", decoded.Served)
+func TestFeedServer_StatusEndpoint_ReaderDone(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(1))
+
+	// Drain the request so reader finishes.
+	<-server.reqCh
+	time.Sleep(50 * time.Millisecond)
+
+	req := httptest.NewRequest("GET", "/status", nil)
+	w := httptest.NewRecorder()
+	server.handleStatus(w, req)
+
+	var status feedStatus
+	json.NewDecoder(w.Body).Decode(&status)
+
+	if !status.ReaderDone {
+		t.Error("expected ReaderDone=true after all requests consumed")
 	}
-	if decoded.CurrentRPS != 50.5 {
-		t.Errorf("expected currentRps=50.5, got %f", decoded.CurrentRPS)
+}
+
+func TestFeedServer_AckEndpoint(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(1))
+
+	body := strings.NewReader(`{"count": 50}`)
+	req := httptest.NewRequest("POST", "/ack", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.handleAck(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
-	_ = server // used above
+	if server.acked.Load() != 50 {
+		t.Errorf("expected acked=50, got %d", server.acked.Load())
+	}
+}
+
+func TestFeedServer_AckEndpoint_NegativeCount(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(1))
+
+	body := strings.NewReader(`{"count": -10}`)
+	req := httptest.NewRequest("POST", "/ack", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.handleAck(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for negative count, got %d", w.Code)
+	}
+}
+
+func TestFeedServer_AckEndpoint_InvalidBody(t *testing.T) {
+	server := newTestFeedServer(t, testRequests(1))
+
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest("POST", "/ack", body)
+	w := httptest.NewRecorder()
+	server.handleAck(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid body, got %d", w.Code)
+	}
 }
 
 func TestFeedServer_NilReaderError(t *testing.T) {
 	_, err := NewFeedServer(FeedServerConfig{})
 	if err == nil {
 		t.Error("expected error with nil reader")
+	}
+}
+
+func TestFeedServer_ConstantRateRejected(t *testing.T) {
+	_, err := NewFeedServer(FeedServerConfig{
+		Reader:   &mockReader{requests: testRequests(1)},
+		RateMode: RateModeConstant,
+	})
+	if err == nil {
+		t.Error("expected error for RateModeConstant")
 	}
 }
 
@@ -158,19 +247,37 @@ func TestFeedServer_Defaults(t *testing.T) {
 	}
 }
 
-func TestFeedServer_AckHandler(t *testing.T) {
-	reader := &mockReader{requests: testRequests(1)}
-	server, err := NewFeedServer(FeedServerConfig{Reader: reader})
+func TestFeedServer_FeedStatusJSON(t *testing.T) {
+	status := feedStatus{
+		Served:     100,
+		Acked:      90,
+		BufferLen:  5,
+		BufferCap:  10,
+		Elapsed:    time.Minute,
+		CurrentRPS: 50.5,
+		ReaderDone: true,
+	}
+
+	data, err := json.Marshal(status)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Test the ack handler directly.
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ack", server.handleAck)
+	var decoded feedStatus
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
 
-	// Verify ack counter starts at 0.
-	if server.acked.Load() != 0 {
-		t.Error("expected initial acked to be 0")
+	if decoded.Served != 100 {
+		t.Errorf("expected served=100, got %d", decoded.Served)
+	}
+	if decoded.CurrentRPS != 50.5 {
+		t.Errorf("expected currentRps=50.5, got %f", decoded.CurrentRPS)
+	}
+	if !decoded.ReaderDone {
+		t.Error("expected ReaderDone=true")
 	}
 }
+
+// Ensure unused fmt import compiles (used in feedserver.go).
+var _ = fmt.Sprintf

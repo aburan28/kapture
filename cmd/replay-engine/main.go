@@ -8,14 +8,18 @@
 //
 // Usage:
 //
+//	# Direct replay (engine controls rate + sends requests):
 //	replay-engine \
-//	  --storage-type s3 \
-//	  --bucket my-captures \
+//	  --storage-type s3 --bucket my-captures \
 //	  --capture-id production/api-gateway \
 //	  --target-url http://staging.internal:8080 \
-//	  --rate-mode original \
-//	  --concurrency 50 \
-//	  --checkpoint-dir /var/lib/kapture/checkpoints
+//	  --rate-mode original --concurrency 50
+//
+//	# Feed server mode (k6/external generator sends requests):
+//	replay-engine \
+//	  --storage-type s3 --bucket my-captures \
+//	  --capture-id production/api-gateway \
+//	  --serve --addr :6565 --rate-mode original
 package main
 
 import (
@@ -49,9 +53,13 @@ type config struct {
 	methods    string
 	limit      int64
 
-	// Replay target
+	// Replay target (direct mode)
 	targetURL       string
 	overrideHeaders string
+
+	// Feed server mode
+	serve bool
+	addr  string
 
 	// Engine
 	rateMode      string
@@ -101,9 +109,13 @@ func parseFlags() config {
 	flag.StringVar(&cfg.methods, "methods", "", "Filter by HTTP methods (comma-separated)")
 	flag.Int64Var(&cfg.limit, "limit", 0, "Max requests to replay (0=unlimited)")
 
-	// Target flags.
-	flag.StringVar(&cfg.targetURL, "target-url", "", "Target service URL (required)")
+	// Target flags (direct mode).
+	flag.StringVar(&cfg.targetURL, "target-url", "", "Target service URL (required in direct mode)")
 	flag.StringVar(&cfg.overrideHeaders, "override-headers", "", "Headers to override (key=value,key=value)")
+
+	// Feed server flags.
+	flag.BoolVar(&cfg.serve, "serve", false, "Run as feed server for external load generators (k6)")
+	flag.StringVar(&cfg.addr, "addr", ":6565", "Feed server listen address (--serve mode)")
 
 	// Engine flags.
 	flag.StringVar(&cfg.rateMode, "rate-mode", "original", "Rate mode: original, constant, unlimited")
@@ -113,8 +125,8 @@ func parseFlags() config {
 
 	// Checkpoint flags.
 	flag.StringVar(&cfg.checkpointDir, "checkpoint-dir", "/tmp/kapture-checkpoints", "Checkpoint directory")
-	flag.StringVar(&cfg.replayID, "replay-id", "", "Replay session ID (auto-generated if empty)")
-	flag.BoolVar(&cfg.resume, "resume", false, "Resume from last checkpoint")
+	flag.StringVar(&cfg.replayID, "replay-id", "", "Replay session ID (required with --resume, auto-generated otherwise)")
+	flag.BoolVar(&cfg.resume, "resume", false, "Resume from last checkpoint (requires --replay-id)")
 
 	// Output flags.
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "Log level: debug, info, warn, error")
@@ -128,11 +140,18 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 	if cfg.captureID == "" {
 		return fmt.Errorf("--capture-id is required")
 	}
-	if cfg.targetURL == "" {
-		return fmt.Errorf("--target-url is required")
-	}
 	if cfg.storageType == "" {
 		return fmt.Errorf("--storage-type is required")
+	}
+
+	// Validate mode: either --serve or --target-url must be specified.
+	if !cfg.serve && cfg.targetURL == "" {
+		return fmt.Errorf("either --target-url (direct mode) or --serve (feed server mode) is required")
+	}
+
+	// Validate --resume requires --replay-id to find the right checkpoint.
+	if cfg.resume && cfg.replayID == "" {
+		return fmt.Errorf("--resume requires --replay-id to locate the checkpoint")
 	}
 
 	// Generate replay ID if not provided.
@@ -144,9 +163,8 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 		"replayId", cfg.replayID,
 		"captureId", cfg.captureID,
 		"storageType", cfg.storageType,
-		"targetUrl", cfg.targetURL,
 		"rateMode", cfg.rateMode,
-		"concurrency", cfg.concurrency)
+		"serve", cfg.serve)
 
 	// Build reader from storage config.
 	readerConfig := buildReaderConfig(cfg)
@@ -156,6 +174,55 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 	}
 	defer reader.Close()
 
+	// Feed server mode: start HTTP server and block.
+	if cfg.serve {
+		return runFeedServer(ctx, cfg, reader, logger)
+	}
+
+	// Direct mode: use the replay engine.
+	return runDirectReplay(ctx, cfg, reader, logger)
+}
+
+func runFeedServer(ctx context.Context, cfg config, reader replay.Reader, logger *slog.Logger) error {
+	rateMode, err := parseRateMode(cfg.rateMode)
+	if err != nil {
+		return err
+	}
+
+	readOpts, err := buildReadOptions(cfg)
+	if err != nil {
+		return err
+	}
+
+	server, err := replay.NewFeedServer(replay.FeedServerConfig{
+		Reader:     reader,
+		ReadOpts:   readOpts,
+		RateMode:   rateMode,
+		TimeScale:  cfg.timeScale,
+		Addr:       cfg.addr,
+		BufferSize: cfg.concurrency * 100,
+		Logger:     logger,
+	})
+	if err != nil {
+		return fmt.Errorf("create feed server: %w", err)
+	}
+
+	if err := server.Start(ctx); err != nil {
+		return fmt.Errorf("start feed server: %w", err)
+	}
+
+	logger.Info("feed server running", "addr", cfg.addr)
+
+	// Block until signal.
+	<-ctx.Done()
+	logger.Info("shutting down feed server")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return server.Stop(shutdownCtx)
+}
+
+func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logger *slog.Logger) error {
 	// Build HTTP sender.
 	sender, err := replay.NewHTTPSender(replay.HTTPSenderConfig{
 		TargetBaseURL:   cfg.targetURL,
@@ -186,6 +253,9 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 			logger.Info("resuming from checkpoint",
 				"requestsSent", existingCheckpoint.RequestsSent,
 				"lastObject", existingCheckpoint.LastObjectKey)
+		} else {
+			logger.Warn("no checkpoint found for replay ID, starting from beginning",
+				"replayId", cfg.replayID)
 		}
 	}
 
@@ -306,7 +376,11 @@ func buildReadOptions(cfg config) (replay.ReadOptions, error) {
 		opts.EndTime = t
 	}
 	if cfg.methods != "" {
-		opts.Methods = strings.Split(cfg.methods, ",")
+		methods := strings.Split(cfg.methods, ",")
+		for i := range methods {
+			methods[i] = strings.TrimSpace(methods[i])
+		}
+		opts.Methods = methods
 	}
 	return opts, nil
 }

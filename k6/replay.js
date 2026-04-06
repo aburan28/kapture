@@ -27,6 +27,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
+import encoding from 'k6/encoding';
 
 // --- Configuration ---
 const FEED_URL = __ENV.FEED_URL || 'http://localhost:6565';
@@ -126,8 +127,8 @@ function replayRequest(captured) {
 
   let body = null;
   if (captured.body && method !== 'GET' && method !== 'HEAD') {
-    // Body is base64-encoded in JSON; k6 sends it as-is if it's a string.
-    body = captured.body;
+    // Go's json.Marshal encodes []byte as base64. Decode to get original bytes.
+    body = encoding.b64decode(captured.body, 'std', 's');
   }
 
   let res;
@@ -206,7 +207,7 @@ export default function () {
   }
 }
 
-// Final acknowledgment for any remaining un-acked requests.
+// Final teardown hook: log replay completion.
 export function teardown() {
   console.log('Replay session complete');
 }

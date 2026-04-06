@@ -35,15 +35,17 @@ type FeedServer struct {
 	bufferSize int
 	reqCh      chan *storage.CapturedRequest
 	readErr    atomic.Value // stores error
+	readerDone atomic.Bool  // set when readLoop exits (success or error)
 
 	// Progress tracking.
 	served    atomic.Int64
 	acked     atomic.Int64
 	startTime time.Time
 
-	server *http.Server
-	done   chan struct{}
-	once   sync.Once
+	server   *http.Server
+	cancelFn context.CancelFunc // cancels the internal context to unblock reader
+	done     chan struct{}
+	once     sync.Once
 }
 
 // FeedServerConfig configures the FeedServer.
@@ -58,9 +60,14 @@ type FeedServerConfig struct {
 }
 
 // NewFeedServer creates an HTTP server that feeds requests to external consumers.
+// Only RateModeOriginalTiming and RateModeUnlimited are supported; constant-rate
+// pacing should be handled by the external load generator (e.g., k6 VU count).
 func NewFeedServer(cfg FeedServerConfig) (*FeedServer, error) {
 	if cfg.Reader == nil {
 		return nil, fmt.Errorf("reader is required")
+	}
+	if cfg.RateMode == RateModeConstant {
+		return nil, fmt.Errorf("RateModeConstant is not supported by FeedServer; use the replay Engine directly or control rate via the external load generator")
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = ":6565"
@@ -96,8 +103,12 @@ func (s *FeedServer) Start(ctx context.Context) error {
 
 	s.startTime = time.Now()
 
+	// Create an internal cancellable context so Stop() can unblock the reader.
+	innerCtx, cancel := context.WithCancel(ctx)
+	s.cancelFn = cancel
+
 	// Start background reader goroutine.
-	go s.readLoop(ctx)
+	go s.readLoop(innerCtx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /next", s.handleNext)
@@ -120,19 +131,37 @@ func (s *FeedServer) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully shuts down the feed server.
+// Stop gracefully shuts down the feed server and closes the reader.
 func (s *FeedServer) Stop(ctx context.Context) error {
-	s.once.Do(func() { close(s.done) })
+	s.once.Do(func() {
+		close(s.done)
+		// Cancel the internal context to unblock reader.Next() if it's in-flight.
+		if s.cancelFn != nil {
+			s.cancelFn()
+		}
+	})
+
+	var serverErr error
 	if s.server != nil {
-		return s.server.Shutdown(ctx)
+		serverErr = s.server.Shutdown(ctx)
 	}
-	return nil
+
+	// Close the reader to release storage resources (open files, S3/GCS bodies).
+	if err := s.reader.Close(); err != nil {
+		s.log.Warn("reader close error", "error", err)
+	}
+
+	return serverErr
 }
 
 func (s *FeedServer) readLoop(ctx context.Context) {
-	defer close(s.reqCh)
+	defer func() {
+		s.readerDone.Store(true)
+		close(s.reqCh)
+	}()
 
 	var prevTimestamp time.Time
+	var delayTimer *time.Timer
 
 	for {
 		select {
@@ -151,17 +180,25 @@ func (s *FeedServer) readLoop(ctx context.Context) {
 			return
 		}
 
-		// Apply original timing delay if configured.
+		// Apply original timing delay if configured, using a reusable timer
+		// to avoid allocating a new one per request.
 		if s.rateMode == RateModeOriginalTiming && !prevTimestamp.IsZero() && !req.Timestamp.IsZero() {
 			delay := req.Timestamp.Sub(prevTimestamp)
 			if delay > 0 {
 				scaledDelay := time.Duration(float64(delay) * s.timeScale)
+				if delayTimer == nil {
+					delayTimer = time.NewTimer(scaledDelay)
+				} else {
+					delayTimer.Reset(scaledDelay)
+				}
 				select {
 				case <-ctx.Done():
+					delayTimer.Stop()
 					return
 				case <-s.done:
+					delayTimer.Stop()
 					return
-				case <-time.After(scaledDelay):
+				case <-delayTimer.C:
 				}
 			}
 		}
@@ -245,14 +282,14 @@ respond:
 }
 
 type feedStatus struct {
-	Served       int64         `json:"served"`
-	Acked        int64         `json:"acked"`
-	BufferLen    int           `json:"bufferLen"`
-	BufferCap    int           `json:"bufferCap"`
-	Elapsed      time.Duration `json:"elapsed"`
-	CurrentRPS   float64       `json:"currentRps"`
-	ReaderDone   bool          `json:"readerDone"`
-	ReaderError  string        `json:"readerError,omitempty"`
+	Served      int64         `json:"served"`
+	Acked       int64         `json:"acked"`
+	BufferLen   int           `json:"bufferLen"`
+	BufferCap   int           `json:"bufferCap"`
+	Elapsed     time.Duration `json:"elapsed"`
+	CurrentRPS  float64       `json:"currentRps"`
+	ReaderDone  bool          `json:"readerDone"`
+	ReaderError string        `json:"readerError,omitempty"`
 }
 
 func (s *FeedServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -260,11 +297,12 @@ func (s *FeedServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	served := s.served.Load()
 
 	status := feedStatus{
-		Served:    served,
-		Acked:     s.acked.Load(),
-		BufferLen: len(s.reqCh),
-		BufferCap: cap(s.reqCh),
-		Elapsed:   elapsed,
+		Served:     served,
+		Acked:      s.acked.Load(),
+		BufferLen:  len(s.reqCh),
+		BufferCap:  cap(s.reqCh),
+		Elapsed:    elapsed,
+		ReaderDone: s.readerDone.Load(),
 	}
 
 	if elapsed > 0 {
@@ -273,7 +311,6 @@ func (s *FeedServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	if errVal := s.readErr.Load(); errVal != nil {
 		status.ReaderError = fmt.Sprintf("%v", errVal)
-		status.ReaderDone = true
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -286,6 +323,10 @@ func (s *FeedServer) handleAck(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if body.Count < 0 {
+		http.Error(w, "count must be >= 0", http.StatusBadRequest)
 		return
 	}
 	s.acked.Add(body.Count)
