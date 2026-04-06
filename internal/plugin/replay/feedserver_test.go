@@ -3,7 +3,6 @@ package replay
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -283,6 +282,3 @@ func TestFeedServer_FeedStatusJSON(t *testing.T) {
 		t.Error("expected ReaderDone=true")
 	}
 }
-
-// Ensure unused fmt import compiles (used in feedserver.go).
-var _ = fmt.Sprintf
