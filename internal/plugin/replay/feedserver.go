@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -239,7 +240,9 @@ func (s *FeedServer) handleNext(w http.ResponseWriter, r *http.Request) {
 func (s *FeedServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 	n := 100
 	if q := r.URL.Query().Get("n"); q != "" {
-		fmt.Sscanf(q, "%d", &n)
+		if parsed, err := strconv.Atoi(q); err == nil {
+			n = parsed
+		}
 	}
 	if n <= 0 {
 		n = 1
