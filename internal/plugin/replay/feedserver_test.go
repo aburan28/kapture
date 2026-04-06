@@ -76,7 +76,20 @@ func TestFeedServer_NextEndpoint_ReplayComplete(t *testing.T) {
 	}
 
 	// Wait for reader to finish and channel to close.
-	time.Sleep(100 * time.Millisecond)
+	// Use a polling loop instead of fixed sleep — the readLoop must
+	// process ErrReaderDone and close the channel.
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for reader to finish")
+		default:
+		}
+		if server.readerDone.Load() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Next call should return 410 Gone.
 	req = httptest.NewRequest("GET", "/next", nil)
@@ -150,14 +163,29 @@ func TestFeedServer_StatusEndpoint_ReaderDone(t *testing.T) {
 
 	// Drain the request so reader finishes.
 	<-server.reqCh
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for readLoop to exit (sets readerDone).
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for reader to finish")
+		default:
+		}
+		if server.readerDone.Load() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	w := httptest.NewRecorder()
 	server.handleStatus(w, req)
 
 	var status feedStatus
-	json.NewDecoder(w.Body).Decode(&status)
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("failed to decode status: %v", err)
+	}
 
 	if !status.ReaderDone {
 		t.Error("expected ReaderDone=true after all requests consumed")

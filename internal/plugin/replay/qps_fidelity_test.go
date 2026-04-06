@@ -397,14 +397,15 @@ func TestFeedServer_OriginalTimingPacing(t *testing.T) {
 
 	// Read requests and record when each arrives.
 	receiveTimes := make([]time.Time, 0, numRequests)
+loop:
 	for i := 0; i < numRequests; i++ {
 		select {
 		case _, ok := <-server.reqCh:
 			if !ok {
-				break
+				break loop
 			}
 			receiveTimes = append(receiveTimes, time.Now())
-		case <-time.After(2 * time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for request from feed server")
 		}
 	}
