@@ -157,7 +157,14 @@ func (e *Engine) Run(ctx context.Context) (*Summary, error) {
 		return nil, fmt.Errorf("reader: %w", err)
 	}
 
-	return e.resultHandler.Summarize(ctx)
+	summary, err := e.resultHandler.Summarize(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// FilteredCount is tracked by the engine (readLoop), not the result
+	// handler, because filtered requests never reach the sender.
+	summary.FilteredCount = e.filtered.Load()
+	return summary, nil
 }
 
 // Progress returns current replay progress counters.

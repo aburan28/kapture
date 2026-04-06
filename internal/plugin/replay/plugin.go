@@ -385,15 +385,17 @@ func errorCategory(err error) string {
 	if err == nil {
 		return ""
 	}
-	var netErr interface{ Timeout() bool }
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return "timeout"
-	}
+	// Check specific context errors before the generic Timeout() interface,
+	// because context.DeadlineExceeded implements Timeout() returning true.
 	if errors.Is(err, context.Canceled) {
 		return "canceled"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline_exceeded"
+	}
+	var netErr interface{ Timeout() bool }
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
 	}
 	if errors.Is(err, io.EOF) {
 		return "connection_closed"
