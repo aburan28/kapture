@@ -37,7 +37,7 @@ jobs:
           go-version: "1.26"
       - name: Install envtest binaries
         run: |
-          KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.0 --bin-dir ./testbin -p path)
+          KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.0 --bin-dir ${{ github.workspace }}/testbin -p path)
           echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> "$GITHUB_ENV"
       - run: go test ./test/integration/... -v -race -timeout 300s
 
