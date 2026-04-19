@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kapture-io/kapture/internal/storage"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
 )
 
 const (
@@ -43,7 +43,7 @@ func NewPostgresRepository(ctx context.Context, databaseURL string) (*PostgresRe
 		return nil, errors.New("database URL is required")
 	}
 
-	db, err := sql.Open("pgx", databaseURL)
+	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
