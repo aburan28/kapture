@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      - run: go mod download
       - run: go vet ./...
 
   unit-test:
@@ -22,6 +23,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      - run: go mod download
       - run: go test ./internal/... -v -race -coverprofile=coverage.out
       - uses: actions/upload-artifact@v4
         with:
@@ -35,6 +37,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      - run: go mod download
       - name: Install envtest binaries
         run: |
           KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.0 --bin-dir ${{ github.workspace }}/testbin -p path)
@@ -57,4 +60,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      - run: go mod download
       - run: go build ./...
