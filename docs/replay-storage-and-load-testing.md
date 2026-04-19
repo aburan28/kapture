@@ -89,6 +89,14 @@ names directly into object paths.
 
 `manifest.json` is the single object every controller reads first.
 
+Path resolution is intentionally simple in v1. `storage.prefix` is the
+canonical dataset root, and `manifest.json` must live directly under that root.
+All relative paths in the manifest, bundle index, time bucket index, leases,
+validation reports, and body refs are resolved by joining them to
+`storage.prefix`. Producers should not emit leading slashes in relative paths,
+and consumers should not resolve paths relative to the manifest object's parent
+independently from `storage.prefix`.
+
 ```json
 {
   "schemaVersion": "kapture.replay.dataset.v1",
@@ -168,11 +176,14 @@ scheduling. Bundle records can be produced from today's
     "partitionKey": "api.example.com|/api/v2/users"
   },
   "metadata": {
-    "capturedProtocol": "HTTP",
-    "bodyTruncated": "false"
+    "capturedProtocol": "HTTP"
   }
 }
 ```
+
+`metadata` remains a freeform string map for source capture metadata. For
+compatibility with today's capture agent, `bodyTruncated` should only appear in
+metadata when truncation happened, with value `"true"`; absence means false.
 
 For very large bodies, use an external body reference instead of inline base64:
 
@@ -181,6 +192,7 @@ For very large bodies, use an external body reference instead of inline base64:
   "body": {
     "encoding": "raw",
     "ref": "bodies/sha256/95/d5/95d5...",
+    "storageEncoding": "identity",
     "contentLength": 8388608,
     "sha256": "95d5..."
   }
@@ -191,6 +203,12 @@ Inline bodies keep small request replay fast. External body references prevent a
 few large requests from forcing every scheduler buffer to hold huge JSON lines.
 The prepare job should default to inline bodies below 1 MiB and external bodies
 above that threshold.
+
+For external body refs, `encoding: raw` means the referenced object contains the
+exact request body bytes, not base64 text. `storageEncoding` must be `identity`
+for v1 body objects; if future formats add compression, they need a new explicit
+storage encoding. `contentLength` and `sha256` are computed over the exact bytes
+the sidecar will send after resolving the reference.
 
 ## Data Size Management
 
@@ -500,8 +518,15 @@ shorten the prefetch window, or reject the run.
 Recorded mode uses virtual time:
 
 ```text
-due_time = run_start_time + sourceOffsetNs / timeScale
+due_time = run_start_time + duration(sourceOffsetNs / timeScale)
 ```
+
+`sourceOffsetNs` is always an integer nanosecond offset from `timing.baseTime`.
+`timeScale` is a positive numeric multiplier parsed from strings such as `1x`,
+`2x`, or `0.5x`; `2x` halves the recorded interval, and `0.5x` doubles it. Time
+bucket offsets use milliseconds only for compact indexes and lease boundaries;
+controllers and sidecars must convert bucket offsets to nanoseconds before
+comparing them with per-record `sourceOffsetNs`.
 
 `qpsScale` controls how many records from each bucket are sent:
 
