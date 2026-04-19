@@ -17,6 +17,8 @@ import (
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
+const historyUpdateTimeout = 5 * time.Second
+
 func main() {
 	var (
 		httpPort         = flag.Int("http-port", 8080, "HTTP sink listen port")
@@ -52,6 +54,11 @@ func main() {
 		if *captureName == "" {
 			*captureName = name
 		}
+	}
+
+	if strings.TrimSpace(*databaseURL) != "" && (strings.TrimSpace(*captureNamespace) == "" || strings.TrimSpace(*captureName) == "") {
+		log.Error("capture namespace and name are required when capture history is enabled", "captureID", *captureID)
+		os.Exit(1)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -156,7 +163,9 @@ func main() {
 			status = history.StatusFailed
 			errMsg = serverErr.Error()
 		}
-		if err := historyRepo.UpsertCapture(context.Background(), history.Capture{
+		historyCtx, historyCancel := context.WithTimeout(context.Background(), historyUpdateTimeout)
+		defer historyCancel()
+		if err := historyRepo.UpsertCapture(historyCtx, history.Capture{
 			ID:          *captureID,
 			Namespace:   *captureNamespace,
 			Name:        *captureName,
