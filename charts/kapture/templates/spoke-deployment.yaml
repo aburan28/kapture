@@ -29,7 +29,10 @@ spec:
               value: {{ .Values.spoke.hub.address | quote }}
             {{- end }}
             {{- if .Values.history.enabled }}
-            {{- if .Values.history.databaseURL.secretName }}
+            {{- if .Values.history.localPostgres.enabled }}
+            - name: DATABASE_URL
+              value: {{ include "kapture.history.localPostgres.databaseURL" . | quote }}
+            {{- else if .Values.history.databaseURL.secretName }}
             - name: DATABASE_URL_SECRET_NAME
               value: {{ .Values.history.databaseURL.secretName | quote }}
             - name: DATABASE_URL_SECRET_KEY
