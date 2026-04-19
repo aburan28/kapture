@@ -211,6 +211,9 @@ Each line is a JSON object:
 }
 ```
 
+For the proposed replay-oriented dataset format and large-scale load testing
+plan, see [Replay Storage and Load Testing Design](docs/replay-storage-and-load-testing.md).
+
 ## Installation
 
 ### Prerequisites
