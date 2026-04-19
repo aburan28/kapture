@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,13 +40,17 @@ func main() {
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metrics endpoint binds to.")
 	flag.StringVar(&healthProbeAddr, "health-probe-addr", ":8081", "The address the health probe endpoint binds to.")
-	flag.StringVar(&hubAddress, "hub-address", "", "The gRPC address of the hub (optional, spoke works standalone if empty).")
-	flag.StringVar(&spokeName, "spoke-name", "", "The name of this spoke cluster (defaults to hostname).")
-	flag.StringVar(&clusterID, "cluster-id", "", "The cluster identifier for this spoke.")
+	flag.StringVar(&hubAddress, "hub-address", envOr("HUB_ADDRESS", ""), "The gRPC address of the hub (optional, spoke works standalone if empty).")
+	flag.StringVar(&spokeName, "spoke-name", envOr("SPOKE_NAME", ""), "The name of this spoke cluster (defaults to hostname).")
+	flag.StringVar(&clusterID, "cluster-id", envOr("CLUSTER_ID", ""), "The cluster identifier for this spoke.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	if agentImage := envOr("AGENT_IMAGE", ""); agentImage != "" {
+		spoke.CaptureAgentImage = agentImage
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
@@ -160,4 +165,11 @@ func main() {
 			setupLog.Error(err, "failed to close hub client")
 		}
 	}
+}
+
+func envOr(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
