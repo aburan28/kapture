@@ -162,7 +162,19 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 		{Name: "STORAGE_TYPE", Value: string(storage.Spec.Type)},
 	}
 
-	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+	if secretName := os.Getenv("DATABASE_URL_SECRET_NAME"); secretName != "" {
+		secretKey := os.Getenv("DATABASE_URL_SECRET_KEY")
+		if secretKey == "" {
+			secretKey = "DATABASE_URL"
+		}
+		envs = append(envs, corev1.EnvVar{
+			Name: "DATABASE_URL",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+				Key:                  secretKey,
+			}},
+		})
+	} else if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
 		envs = append(envs, corev1.EnvVar{Name: "DATABASE_URL", Value: databaseURL})
 	}
 
