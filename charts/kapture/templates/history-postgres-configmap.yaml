@@ -1,0 +1,12 @@
+{{- if and .Values.history.enabled .Values.history.localPostgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kapture.history.localPostgres.name" . }}-init
+  namespace: {{ include "kapture.namespace" . }}
+  labels:
+    {{- include "kapture.history.localPostgres.labels" . | nindent 4 }}
+data:
+  001_capture_history.sql: |-
+{{ .Files.Get "files/001_capture_history.sql" | nindent 4 }}
+{{- end }}

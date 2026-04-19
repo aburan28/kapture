@@ -1,0 +1,98 @@
+{{- if and .Values.history.enabled .Values.history.localPostgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kapture.history.localPostgres.name" . }}
+  namespace: {{ include "kapture.namespace" . }}
+  labels:
+    {{- include "kapture.history.localPostgres.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "kapture.history.localPostgres.name" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kapture.history.localPostgres.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kapture.history.localPostgres.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.history.localPostgres.image.repository }}:{{ .Values.history.localPostgres.image.tag }}"
+          imagePullPolicy: {{ .Values.history.localPostgres.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.history.localPostgres.service.port }}
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kapture.history.localPostgres.name" . }}
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kapture.history.localPostgres.name" . }}
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kapture.history.localPostgres.name" . }}
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.history.localPostgres.auth.username | quote }}
+                - -d
+                - {{ .Values.history.localPostgres.auth.database | quote }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.history.localPostgres.auth.username | quote }}
+                - -d
+                - {{ .Values.history.localPostgres.auth.database | quote }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.history.localPostgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: initdb
+          configMap:
+            name: {{ include "kapture.history.localPostgres.name" . }}-init
+        {{- if not .Values.history.localPostgres.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.history.localPostgres.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "kapture.history.localPostgres.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.history.localPostgres.persistence.storageClass }}
+        storageClassName: {{ .Values.history.localPostgres.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.history.localPostgres.persistence.size | quote }}
+  {{- end }}
+{{- end }}

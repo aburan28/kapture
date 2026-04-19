@@ -1,0 +1,18 @@
+{{- if and .Values.history.enabled .Values.history.localPostgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kapture.history.localPostgres.name" . }}
+  namespace: {{ include "kapture.namespace" . }}
+  labels:
+    {{- include "kapture.history.localPostgres.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kapture.history.localPostgres.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.history.localPostgres.service.port }}
+      targetPort: postgres
+      protocol: TCP
+{{- end }}

@@ -3,6 +3,41 @@
 # -- Install CRDs with the chart
 installCRDs: true
 
+history:
+  # -- Enable PostgreSQL/RDS-backed capture history metadata.
+  enabled: false
+  databaseURL:
+    # -- Direct PostgreSQL connection URL for development installs.
+    value: ""
+    # -- Existing Secret containing the PostgreSQL connection URL.
+    secretName: ""
+    # -- Key inside secretName containing the PostgreSQL connection URL.
+    secretKey: "DATABASE_URL"
+  localPostgres:
+    # -- Deploy an in-cluster PostgreSQL database for local development.
+    enabled: false
+    image:
+      repository: postgres
+      tag: "18-alpine"
+      pullPolicy: IfNotPresent
+    auth:
+      database: kapture
+      username: kapture
+      password: kapture
+    service:
+      port: 5432
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
 hub:
   # -- Enable the hub controller
   enabled: true

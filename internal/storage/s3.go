@@ -3,6 +3,8 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -16,13 +18,16 @@ type s3PutObjectAPI interface {
 }
 
 type S3Config struct {
-	Bucket         string
-	Region         string
-	Prefix         string
-	AgentPod       string
-	FlushInterval  time.Duration
-	MaxBufferBytes int
-	Client         s3PutObjectAPI
+	Bucket           string
+	Region           string
+	Prefix           string
+	AgentPod         string
+	CaptureNamespace string
+	CaptureName      string
+	FlushInterval    time.Duration
+	MaxBufferBytes   int
+	Client           s3PutObjectAPI
+	ArtifactRecorder ArtifactRecorder
 }
 
 func (S3Config) isStorageConfig() {}
@@ -54,6 +59,7 @@ func (f *S3WriterFactory) NewWriter(_ context.Context, captureID string) (Writer
 		return nil, fmt.Errorf("capture ID is required")
 	}
 
+	var objectWriter *bufferedObjectWriter
 	upload := func(ctx context.Context, objectName string, payload []byte) error {
 		_, err := f.config.Client.PutObject(ctx, &awss3.PutObjectInput{
 			Bucket:          aws.String(f.config.Bucket),
@@ -65,14 +71,41 @@ func (f *S3WriterFactory) NewWriter(_ context.Context, captureID string) (Writer
 		if err != nil {
 			return fmt.Errorf("put s3 object %q: %w", objectName, err)
 		}
+
+		if f.config.ArtifactRecorder != nil {
+			createdAt := time.Now().UTC()
+			if objectWriter != nil && objectWriter.now != nil {
+				createdAt = objectWriter.now().UTC()
+			}
+
+			checksum := sha256.Sum256(payload)
+			artifact := ArtifactRecord{
+				CaptureID:        captureID,
+				CaptureNamespace: f.config.CaptureNamespace,
+				CaptureName:      f.config.CaptureName,
+				StorageBackend:   "s3",
+				Bucket:           f.config.Bucket,
+				Key:              objectName,
+				Region:           f.config.Region,
+				ContentType:      contentTypeJSONL,
+				ContentEncoding:  contentEncodingGZIP,
+				SizeBytes:        int64(len(payload)),
+				SHA256:           hex.EncodeToString(checksum[:]),
+				CreatedAt:        createdAt,
+			}
+			if err := f.config.ArtifactRecorder.RecordArtifact(ctx, artifact); err != nil {
+				return fmt.Errorf("record s3 artifact %q: %w", objectName, err)
+			}
+		}
 		return nil
 	}
 
-	return &S3Writer{bufferedObjectWriter: newBufferedObjectWriter(
+	objectWriter = newBufferedObjectWriter(
 		captureID,
 		f.config.FlushInterval,
 		f.config.MaxBufferBytes,
 		newCloudObjectName(f.config.Prefix, captureID, f.config.AgentPod),
 		upload,
-	)}, nil
+	)
+	return &S3Writer{bufferedObjectWriter: objectWriter}, nil
 }

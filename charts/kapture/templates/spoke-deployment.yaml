@@ -28,6 +28,20 @@ spec:
             - name: HUB_ADDRESS
               value: {{ .Values.spoke.hub.address | quote }}
             {{- end }}
+            {{- if .Values.history.enabled }}
+            {{- if .Values.history.localPostgres.enabled }}
+            - name: DATABASE_URL
+              value: {{ include "kapture.history.localPostgres.databaseURL" . | quote }}
+            {{- else if .Values.history.databaseURL.secretName }}
+            - name: DATABASE_URL_SECRET_NAME
+              value: {{ .Values.history.databaseURL.secretName | quote }}
+            - name: DATABASE_URL_SECRET_KEY
+              value: {{ .Values.history.databaseURL.secretKey | quote }}
+            {{- else if .Values.history.databaseURL.value }}
+            - name: DATABASE_URL
+              value: {{ .Values.history.databaseURL.value | quote }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.spoke.resources | nindent 12 }}
       {{- with .Values.spoke.nodeSelector }}

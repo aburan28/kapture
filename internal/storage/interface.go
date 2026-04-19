@@ -48,6 +48,25 @@ type WriterFactory interface {
 
 type Config interface{ isStorageConfig() }
 
+type ArtifactRecord struct {
+	CaptureID       string
+	CaptureNamespace string
+	CaptureName     string
+	StorageBackend  string
+	Bucket          string
+	Key             string
+	Region          string
+	ContentType     string
+	ContentEncoding string
+	SizeBytes       int64
+	SHA256          string
+	CreatedAt       time.Time
+}
+
+type ArtifactRecorder interface {
+	RecordArtifact(ctx context.Context, artifact ArtifactRecord) error
+}
+
 type objectUploader func(ctx context.Context, objectName string, payload []byte) error
 
 type bufferedObjectWriter struct {

@@ -73,6 +73,41 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Local Postgres resource name
+*/}}
+{{- define "kapture.history.localPostgres.name" -}}
+{{- printf "%s-postgres" (include "kapture.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Local Postgres labels
+*/}}
+{{- define "kapture.history.localPostgres.labels" -}}
+{{ include "kapture.labels" . }}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-postgres
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: postgres
+{{- end }}
+
+{{/*
+Local Postgres selector labels
+*/}}
+{{- define "kapture.history.localPostgres.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kapture.name" . }}-postgres
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Local Postgres connection URL for in-cluster development installs.
+*/}}
+{{- define "kapture.history.localPostgres.databaseURL" -}}
+{{- $username := .Values.history.localPostgres.auth.username | urlquery -}}
+{{- $password := .Values.history.localPostgres.auth.password | urlquery -}}
+{{- $database := .Values.history.localPostgres.auth.database | urlquery -}}
+{{- printf "postgres://%s:%s@%s.%s.svc.cluster.local:%v/%s?sslmode=disable" $username $password (include "kapture.history.localPostgres.name" .) (include "kapture.namespace" .) .Values.history.localPostgres.service.port $database -}}
+{{- end }}
+
+{{/*
 Hub ServiceAccount name
 */}}
 {{- define "kapture.hub.serviceAccountName" -}}
