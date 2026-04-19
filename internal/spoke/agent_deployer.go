@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 )
@@ -63,8 +64,25 @@ func BuildDeployment(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha
 							Ports: []corev1.ContainerPort{
 								{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP},
 								{Name: "grpc", ContainerPort: 9090, Protocol: corev1.ProtocolTCP},
+								{Name: "health", ContainerPort: 8081, Protocol: corev1.ProtocolTCP},
 							},
-							Env:       buildEnvVars(tc, storage),
+							Env: buildEnvVars(tc, storage),
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.FromString("health"),
+								}},
+								InitialDelaySeconds: 2,
+								PeriodSeconds:       5,
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.FromString("health"),
+								}},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+							},
 							Resources: defaultResources(),
 						},
 					},
@@ -87,8 +105,9 @@ func BuildService(tc *capturev1alpha1.TrafficCapture) *corev1.Service {
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP},
-				{Name: "grpc", Port: 9090, Protocol: corev1.ProtocolTCP},
+				{Name: "http", Port: 8080, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+				{Name: "grpc", Port: 9090, TargetPort: intstr.FromString("grpc"), Protocol: corev1.ProtocolTCP},
+				{Name: "health", Port: 8081, TargetPort: intstr.FromString("health"), Protocol: corev1.ProtocolTCP},
 			},
 		},
 	}
@@ -160,6 +179,7 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 		{Name: "CAPTURE_TARGET_NAME", Value: string(tc.Spec.TargetRef.Name)},
 		{Name: "CAPTURE_STORAGE_NAME", Value: string(tc.Spec.StorageRef.Name)},
 		{Name: "STORAGE_TYPE", Value: string(storage.Spec.Type)},
+		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
 	}
 
 	if secretName := os.Getenv("DATABASE_URL_SECRET_NAME"); secretName != "" {
