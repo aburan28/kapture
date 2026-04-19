@@ -67,14 +67,29 @@ func TestBuildDeployment(t *testing.T) {
 	if container.Image != CaptureAgentImage {
 		t.Errorf("expected image %s, got %s", CaptureAgentImage, container.Image)
 	}
-	if len(container.Ports) != 2 {
-		t.Fatalf("expected 2 ports, got %d", len(container.Ports))
+	if len(container.Ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d", len(container.Ports))
 	}
 	if container.Ports[0].ContainerPort != 8080 {
 		t.Errorf("expected port 8080, got %d", container.Ports[0].ContainerPort)
 	}
 	if container.Ports[1].ContainerPort != 9090 {
 		t.Errorf("expected port 9090, got %d", container.Ports[1].ContainerPort)
+	}
+	if container.Ports[2].Name != "health" || container.Ports[2].ContainerPort != 8081 {
+		t.Errorf("expected health port 8081, got %s/%d", container.Ports[2].Name, container.Ports[2].ContainerPort)
+	}
+	if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet == nil {
+		t.Fatal("expected readiness probe with HTTP GET")
+	}
+	if container.ReadinessProbe.HTTPGet.Path != "/healthz" {
+		t.Errorf("expected readiness path /healthz, got %s", container.ReadinessProbe.HTTPGet.Path)
+	}
+	if container.LivenessProbe == nil || container.LivenessProbe.HTTPGet == nil {
+		t.Fatal("expected liveness probe with HTTP GET")
+	}
+	if container.LivenessProbe.HTTPGet.Path != "/healthz" {
+		t.Errorf("expected liveness path /healthz, got %s", container.LivenessProbe.HTTPGet.Path)
 	}
 
 	// Check env vars
@@ -113,14 +128,17 @@ func TestBuildService(t *testing.T) {
 	if svc.Name != "capture-1-capture-agent" {
 		t.Errorf("expected service name capture-1-capture-agent, got %s", svc.Name)
 	}
-	if len(svc.Spec.Ports) != 2 {
-		t.Fatalf("expected 2 ports, got %d", len(svc.Spec.Ports))
+	if len(svc.Spec.Ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d", len(svc.Spec.Ports))
 	}
 	if svc.Spec.Ports[0].Port != 8080 {
 		t.Errorf("expected port 8080, got %d", svc.Spec.Ports[0].Port)
 	}
 	if svc.Spec.Ports[1].Port != 9090 {
 		t.Errorf("expected port 9090, got %d", svc.Spec.Ports[1].Port)
+	}
+	if svc.Spec.Ports[2].Name != "health" || svc.Spec.Ports[2].Port != 8081 {
+		t.Errorf("expected health service port 8081, got %s/%d", svc.Spec.Ports[2].Name, svc.Spec.Ports[2].Port)
 	}
 }
 
@@ -147,4 +165,3 @@ func TestBuildHPA(t *testing.T) {
 		t.Errorf("expected max replicas 15, got %d", hpa.Spec.MaxReplicas)
 	}
 }
-
