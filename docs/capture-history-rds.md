@@ -29,7 +29,7 @@ The secret value should be a PostgreSQL connection URL, for example:
 postgres://kapture:password@my-rds.cluster-abc.us-east-1.rds.amazonaws.com:5432/kapture?sslmode=require
 ```
 
-For local development only, a direct value is also supported:
+Capture agents are created in the same namespace as each `TrafficCapture`, so the referenced secret must exist in every namespace where captures run. For local development only, a direct value is also supported:
 
 ```yaml
 history:
