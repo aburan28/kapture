@@ -41,6 +41,7 @@ Always run the relevant tests before handing work back. For most code changes, r
 Minimum checks for normal Go changes:
 
 ```bash
+go mod download
 go vet ./...
 go test ./internal/... -v -race -coverprofile=coverage.out
 go build ./...
@@ -49,6 +50,7 @@ go build ./...
 Run integration tests when changing API types, reconcilers, generated Kubernetes resources, status handling, or controller behavior:
 
 ```bash
+go mod download
 go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.0 --bin-dir ./testbin
 KUBEBUILDER_ASSETS=./testbin/k8s/1.31.0-$(go env GOOS)-$(go env GOARCH) go test ./test/integration/... -v -race -timeout 300s
 ```
@@ -63,16 +65,17 @@ helm unittest charts/kapture
 Run e2e tests when changing controller lifecycle behavior, Gateway API mirror filter behavior, Dockerfiles, Helm deployment behavior, cross-component wiring, or capture-agent runtime configuration:
 
 ```bash
+go mod download
 go test ./test/e2e/... -v -timeout 600s -count=1
 ```
 
 The GitHub Actions checks that must pass on pull requests are:
 
-- `CI / lint`: `go vet ./...`
-- `CI / unit-test`: `go test ./internal/... -v -race -coverprofile=coverage.out`
+- `CI / lint`: `go mod download`, then `go vet ./...`
+- `CI / unit-test`: `go mod download`, then `go test ./internal/... -v -race -coverprofile=coverage.out`
 - `CI / integration-test`: envtest integration suite
 - `CI / helm-test`: `helm unittest charts/kapture`
-- `CI / build`: `go build ./...`
+- `CI / build`: `go mod download`, then `go build ./...`
 - `E2E Tests / e2e`: Kind cluster, Helm deploy, then `go test ./test/e2e/... -v -timeout 600s -count=1`
 
 If a PR check fails, inspect the failing job log before changing code. Fix the first concrete compiler, vet, test, or runtime error rather than guessing from the check name.
