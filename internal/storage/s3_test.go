@@ -37,6 +37,17 @@ func (f *fakeS3Client) PutObject(_ context.Context, params *awss3.PutObjectInput
 	return &awss3.PutObjectOutput{}, nil
 }
 
+type fakeArtifactRecorder struct {
+	artifact ArtifactRecord
+	calls    int
+}
+
+func (f *fakeArtifactRecorder) RecordArtifact(_ context.Context, artifact ArtifactRecord) error {
+	f.calls++
+	f.artifact = artifact
+	return nil
+}
+
 func TestS3WriterFlushesJSONLGzipObject(t *testing.T) {
 	factory, err := NewS3WriterFactory(context.Background(), S3Config{
 		Bucket:   "captures",
@@ -87,6 +98,57 @@ func TestS3WriterFlushesJSONLGzipObject(t *testing.T) {
 	}
 	if got.ID != req.ID || got.Path != req.Path || got.Protocol != req.Protocol || !bytes.Equal(got.Body, req.Body) {
 		t.Fatalf("unexpected request payload: %+v", got)
+	}
+}
+
+func TestS3WriterRecordsArtifactMetadata(t *testing.T) {
+	recorder := &fakeArtifactRecorder{}
+	factory, err := NewS3WriterFactory(context.Background(), S3Config{
+		Bucket:           "captures",
+		Region:           "us-east-1",
+		Prefix:           "prefix",
+		AgentPod:         "agent-a",
+		CaptureNamespace: "default",
+		CaptureName:      "orders",
+		Client:           &fakeS3Client{},
+		ArtifactRecorder: recorder,
+	})
+	if err != nil {
+		t.Fatalf("NewS3WriterFactory() error = %v", err)
+	}
+
+	writer, err := factory.NewWriter(context.Background(), "default/orders")
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+
+	fixedNow := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+	s3Writer := writer.(*S3Writer)
+	s3Writer.now = func() time.Time { return fixedNow }
+
+	req := &CapturedRequest{ID: "req-1", Timestamp: fixedNow, Method: "GET", Path: "/orders", Protocol: "HTTP"}
+	if err := writer.Write(context.Background(), req); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+
+	if recorder.calls != 1 {
+		t.Fatalf("RecordArtifact() calls = %d, want 1", recorder.calls)
+	}
+	artifact := recorder.artifact
+	if artifact.CaptureID != "default/orders" || artifact.CaptureNamespace != "default" || artifact.CaptureName != "orders" {
+		t.Fatalf("unexpected capture metadata: %+v", artifact)
+	}
+	if artifact.StorageBackend != "s3" || artifact.Bucket != "captures" || artifact.Region != "us-east-1" {
+		t.Fatalf("unexpected storage metadata: %+v", artifact)
+	}
+	if artifact.Key != "prefix/default/orders/2026-03-15/agent-a-000001.jsonl.gz" {
+		t.Fatalf("artifact key = %q", artifact.Key)
+	}
+	if artifact.SizeBytes <= 0 || artifact.SHA256 == "" {
+		t.Fatalf("expected size and checksum, got size=%d sha=%q", artifact.SizeBytes, artifact.SHA256)
 	}
 }
 
