@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Kapture — Capture Service Lifecycle</title>
+<meta name="viewport" content="width=1600"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #f4f1ea;
+    --panel:    #ffffff;
+    --ink:      #1a1814;
+    --ink-2:    #4a4640;
+    --ink-3:    #7a756c;
+    --rule:     #d9d3c5;
+    --rule-2:   #eee9dc;
+    --hi:       oklch(0.93 0.03 90);
+
+    /* phase colours */
+    --pending:  oklch(0.72 0.10 80);   /* amber */
+    --active:   oklch(0.55 0.14 150);  /* moss green */
+    --teardown: oklch(0.55 0.14 38);   /* terracotta */
+    --ctrl:     oklch(0.55 0.14 240);  /* steel blue */
+    --mirror:   oklch(0.50 0.16 300);  /* violet */
+  }
+
+  html,body { margin:0; padding:0; background:var(--bg);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; color:var(--ink); }
+  body { min-width:1400px; }
+
+  .page { width:1400px; margin:0 auto; padding:52px 64px 88px; box-sizing:border-box; }
+
+  /* header */
+  header.doc {
+    display:grid; grid-template-columns:1fr auto; align-items:end;
+    gap:40px; padding-bottom:18px; border-bottom:1px solid var(--rule);
+    margin-bottom:32px;
+  }
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:10px;
+    letter-spacing:.18em; text-transform:uppercase; color:var(--ink-3); margin:0 0 10px; }
+  h1 { font-family:"IBM Plex Serif",serif; font-weight:500; font-size:48px;
+    letter-spacing:-.02em; line-height:1.04; margin:0 0 12px; }
+  h1 em { font-style:italic; color:var(--teardown); }
+  .sub { font-size:14px; line-height:1.55; color:var(--ink-2); margin:0; max-width:640px; }
+  .meta { font-family:"IBM Plex Mono",monospace; font-size:10px;
+    color:var(--ink-3); text-align:right; line-height:1.8; }
+  .meta b { color:var(--ink); font-weight:500; }
+
+  /* phase legend strip */
+  .phasebar {
+    display:flex; gap:0; margin-bottom:32px; border:1px solid var(--rule);
+    border-radius:4px; overflow:hidden;
+  }
+  .ph {
+    flex:1; padding:10px 16px;
+    border-right:1px solid var(--rule);
+    font-family:"IBM Plex Mono",monospace; font-size:10px;
+    letter-spacing:.12em; text-transform:uppercase;
+    display:flex; align-items:center; gap:10px;
+  }
+  .ph:last-child { border-right:none; }
+  .ph-dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  .ph-label { color:var(--ink); font-weight:600; }
+  .ph-desc { color:var(--ink-3); font-size:9.5px; margin-left:4px; }
+  .ph-bg-pending  { background:oklch(0.96 0.03 80); }
+  .ph-bg-active   { background:oklch(0.95 0.03 150); }
+  .ph-bg-teardown { background:oklch(0.96 0.03 38); }
+
+  /* main diagram area */
+  .diagram-wrap {
+    background:var(--panel); border:1px solid var(--rule); border-radius:6px;
+    overflow:hidden; position:relative;
+  }
+  .diagram-wrap::before {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(to right, rgba(0,0,0,.02) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0,0,0,.02) 1px, transparent 1px);
+    background-size:20px 20px;
+  }
+  svg.lc { display:block; width:100%; height:auto; position:relative; z-index:1; }
+
+  /* annotation row */
+  .steps {
+    margin-top:32px;
+    display:grid; grid-template-columns: repeat(3, 1fr); gap:0;
+    border:1px solid var(--rule); border-radius:4px; overflow:hidden;
+  }
+  .step {
+    padding:20px 22px 18px;
+    border-right:1px solid var(--rule);
+  }
+  .step:last-child { border-right:none; }
+  .step-phase {
+    font-family:"IBM Plex Mono",monospace; font-size:9px;
+    letter-spacing:.15em; text-transform:uppercase;
+    margin:0 0 6px; display:flex; align-items:center; gap:8px;
+  }
+  .step-phase span { width:8px; height:8px; border-radius:50%; display:inline-block; flex:none; }
+  .step h4 { font-size:14px; font-weight:600; margin:0 0 8px; }
+  .step ol { margin:0; padding:0 0 0 16px; color:var(--ink-2); font-size:12.5px; line-height:1.65; }
+  .step ol code { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ctrl); }
+  .step ol .red { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--teardown); }
+  .step ol .grn { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--active); }
+  .step ol .vio { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--mirror); }
+
+  footer.doc {
+    margin-top:44px; padding-top:16px; border-top:1px solid var(--rule);
+    display:flex; justify-content:space-between;
+    font-family:"IBM Plex Mono",monospace; font-size:10px; color:var(--ink-3);
+  }
+
+  /* tweaks */
+  .tweaks {
+    position:fixed; right:22px; top:22px; width:256px;
+    background:var(--panel); border:1px solid var(--rule); border-radius:6px;
+    padding:16px 16px 14px; font-family:"IBM Plex Sans",sans-serif;
+    font-size:13px; color:var(--ink);
+    box-shadow:0 10px 36px rgba(26,24,20,.12); z-index:100; display:none;
+  }
+  .tweaks.show { display:block; }
+  .tweaks h4 { margin:0 0 12px; font-size:10px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--ink-3); font-weight:600; }
+  .tw-row { display:flex; justify-content:space-between; align-items:center;
+    padding:7px 0; border-bottom:1px dashed var(--rule-2); }
+  .tw-row:last-child { border-bottom:none; }
+  .tw-row label { color:var(--ink-2); font-size:12px; }
+  .toggle { width:36px; height:20px; background:var(--rule); border-radius:999px;
+    position:relative; cursor:pointer; transition:background .15s; }
+  .toggle::after { content:""; width:14px; height:14px; border-radius:50%;
+    background:#fff; position:absolute; top:3px; left:3px; transition:left .15s;
+    box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .toggle.on { background:var(--teardown); }
+  .toggle.on::after { left:19px; }
+  body[data-actors="off"] .actor-labels { display:none; }
+  body[data-notes="off"] .step-note { display:none; }
+</style>
+</head>
+<body data-actors="on" data-notes="on">
+
+<div class="tweaks" id="tweaks">
+  <h4>Tweaks</h4>
+  <div class="tw-row">
+    <label>Actor labels</label>
+    <div class="toggle on" id="actor-tog"></div>
+  </div>
+  <div class="tw-row">
+    <label>Step notes</label>
+    <div class="toggle on" id="notes-tog"></div>
+  </div>
+</div>
+
+<div class="page">
+
+  <header class="doc">
+    <div>
+      <p class="eyebrow">Capture Lifecycle · capture.gateway.io/v1alpha1</p>
+      <h1>TrafficCapture<br/><em>lifecycle</em> &amp; mirror filter flow</h1>
+      <p class="sub">
+        Sequence of events from <code style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ctrl)">kubectl apply</code> through active capture
+        to deletion — covering capture agent provisioning, <code style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--mirror)">RequestMirror</code> filter
+        injection, traffic flow, and finalizer-guarded teardown.
+      </p>
+    </div>
+    <div class="meta">
+      <div><b>controller</b> &nbsp;agents · hub</div>
+      <div><b>finalizer</b> &nbsp;&nbsp;capture.gateway.io/cleanup</div>
+      <div><b>phases</b> &nbsp;&nbsp;&nbsp;&nbsp;Pending → Active → Completed</div>
+      <div><b>k8s</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;≥ 1.28 + Gateway API</div>
+    </div>
+  </header>
+
+  <!-- Phase bar -->
+  <div class="phasebar">
+    <div class="ph ph-bg-pending">
+      <span class="ph-dot" style="background:var(--pending)"></span>
+      <span class="ph-label">① Pending</span>
+      <span class="ph-desc">— validation &amp; provisioning</span>
+    </div>
+    <div class="ph ph-bg-active">
+      <span class="ph-dot" style="background:var(--active)"></span>
+      <span class="ph-label">② Active</span>
+      <span class="ph-desc">— mirroring &amp; capture running</span>
+    </div>
+    <div class="ph ph-bg-teardown">
+      <span class="ph-dot" style="background:var(--teardown)"></span>
+      <span class="ph-label">③ Teardown</span>
+      <span class="ph-desc">— finalizer cleanup &amp; GC</span>
+    </div>
+  </div>
+
+  <!-- Main SVG lifecycle diagram -->
+  <div class="diagram-wrap">
+    <svg class="lc" viewBox="0 0 1272 1040" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-2)"/>
+        </marker>
+        <marker id="arr-ctrl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ctrl)"/>
+        </marker>
+        <marker id="arr-mirror" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--mirror)"/>
+        </marker>
+        <marker id="arr-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--active)"/>
+        </marker>
+        <marker id="arr-teardown" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--teardown)"/>
+        </marker>
+        <marker id="arr-pending" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--pending)"/>
+        </marker>
+      </defs>
+
+      <!-- ══════════════════════════════════════════ -->
+      <!-- ACTOR SWIMLANE HEADERS -->
+      <!-- ══════════════════════════════════════════ -->
+
+      <!-- column positions: user=80, apiserver=240, controller=420, agent=600, route=780, client=960, storage=1140 -->
+
+      <!-- swimlane background bands -->
+      <rect x="0" y="0" width="1272" height="56" fill="var(--hi)" opacity=".6"/>
+
+      <!-- vertical lifelines (subtle) -->
+      <line x1="80"   y1="56" x2="80"   y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="240"  y1="56" x2="240"  y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="420"  y1="56" x2="420"  y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="600"  y1="56" x2="600"  y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="780"  y1="56" x2="780"  y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="960"  y1="56" x2="960"  y2="1040" stroke="var(--rule)" stroke-width="1"/>
+      <line x1="1140" y1="56" x2="1140" y2="1040" stroke="var(--rule)" stroke-width="1"/>
+
+      <!-- actor headers -->
+      <g class="actor-labels">
+        <!-- User / kubectl -->
+        <rect x="28" y="10" width="104" height="36" rx="4" fill="var(--ink)" />
+        <text x="80" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">USER</text>
+        <text x="80" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#aaa9a5">kubectl / CR</text>
+
+        <!-- API Server -->
+        <rect x="188" y="10" width="104" height="36" rx="4" fill="var(--ink)" />
+        <text x="240" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">API SERVER</text>
+        <text x="240" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#aaa9a5">kube-apiserver</text>
+
+        <!-- Agents Controller -->
+        <rect x="368" y="10" width="104" height="36" rx="4" fill="var(--ctrl)" />
+        <text x="420" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">CONTROLLER</text>
+        <text x="420" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="rgba(255,255,255,0.7)">agents ctrl</text>
+
+        <!-- Capture Agent Pod -->
+        <rect x="548" y="10" width="104" height="36" rx="4" fill="oklch(0.55 0.14 38)" />
+        <text x="600" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">CAPTURE AGENT</text>
+        <text x="600" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="rgba(255,255,255,0.7)">pod :8080/:9090</text>
+
+        <!-- HTTPRoute / GRPCRoute -->
+        <rect x="728" y="10" width="104" height="36" rx="4" fill="var(--mirror)" />
+        <text x="780" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">HTTPROUTE</text>
+        <text x="780" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="rgba(255,255,255,0.7)">+ RequestMirror</text>
+
+        <!-- Client -->
+        <rect x="908" y="10" width="104" height="36" rx="4" fill="var(--ink)" />
+        <text x="960" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">CLIENT</text>
+        <text x="960" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#aaa9a5">HTTP / gRPC</text>
+
+        <!-- Storage -->
+        <rect x="1088" y="10" width="104" height="36" rx="4" fill="var(--active)" />
+        <text x="1140" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#fff" letter-spacing="1">STORAGE</text>
+        <text x="1140" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="rgba(255,255,255,0.7)">S3/GCS/EFS/EBS</text>
+      </g>
+
+      <!-- ══════════════════════════════════════════ -->
+      <!-- PHASE 1: PENDING  (rows 70–370)            -->
+      <!-- ══════════════════════════════════════════ -->
+      <rect x="0" y="70" width="1272" height="300" fill="oklch(0.97 0.02 80)" opacity=".45"/>
+      <text x="12" y="90" font-family="IBM Plex Mono,monospace" font-size="10" fill="var(--pending)" letter-spacing="2" font-weight="600">① PENDING — PROVISION</text>
+
+      <!-- 1. kubectl apply TrafficCapture -->
+      <text x="12" y="118" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">1</text>
+      <line x1="80" y1="120" x2="230" y2="120" stroke="var(--ink-2)" stroke-width="1.4" marker-end="url(#arr)"/>
+      <text x="148" y="113" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ink-2)">kubectl apply TrafficCapture</text>
+
+      <!-- API Server stores CR, adds finalizer notice -->
+      <text x="12" y="148" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">2</text>
+      <line x1="240" y1="150" x2="410" y2="150" stroke="var(--ctrl)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr-ctrl)"/>
+      <text x="328" y="143" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ctrl)">watch event (Reconcile enqueued)</text>
+
+      <!-- Controller: validate CaptureStorage Ready -->
+      <rect x="348" y="162" width="144" height="42" rx="3" fill="var(--panel)" stroke="var(--ctrl)" stroke-width="1"/>
+      <text x="420" y="178" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="11" fill="var(--ink)" font-weight="600">Validate CaptureStorage</text>
+      <text x="420" y="194" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">status.phase == Ready?</text>
+
+      <!-- if storage not ready → requeue -->
+      <text x="12" y="222" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">2a</text>
+      <path d="M 348 183 L 320 183 L 320 222 L 338 222" fill="none" stroke="var(--pending)" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr-pending)"/>
+      <text x="316" y="215" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--pending)">not ready →</text>
+      <text x="316" y="226" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--pending)">requeue 10s</text>
+
+      <!-- add finalizer -->
+      <text x="12" y="248" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">3</text>
+      <line x1="420" y1="250" x2="250" y2="250" stroke="var(--ctrl)" stroke-width="1.4" marker-end="url(#arr-ctrl)"/>
+      <text x="333" y="243" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ctrl)">add finalizer capture.gateway.io/cleanup</text>
+
+      <!-- Create Deployment, Service, HPA -->
+      <text x="12" y="278" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">4</text>
+      <line x1="420" y1="280" x2="250" y2="280" stroke="var(--ctrl)" stroke-width="1.4" marker-end="url(#arr-ctrl)"/>
+      <text x="333" y="273" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ctrl)">createOrUpdate Deployment · Service · HPA</text>
+
+      <!-- kube schedules pod -->
+      <text x="12" y="308" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">5</text>
+      <line x1="240" y1="310" x2="590" y2="310" stroke="var(--ink-2)" stroke-width="1.4" marker-end="url(#arr)"/>
+      <text x="413" y="303" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ink-2)">schedule &amp; start {tc.Name}-capture-agent pod</text>
+
+      <!-- Agent ready probe -->
+      <rect x="548" y="322" width="104" height="30" rx="3" fill="var(--panel)" stroke="oklch(0.55 0.14 38)" stroke-width="1"/>
+      <text x="600" y="334" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="10" fill="var(--ink)" font-weight="600">readinessProbe</text>
+      <text x="600" y="347" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">/healthz · :8081</text>
+
+      <!-- status → Pending (readyReplicas == 0) -->
+      <text x="12" y="368" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">6</text>
+      <line x1="420" y1="370" x2="250" y2="370" stroke="var(--ctrl)" stroke-width="1.4" marker-end="url(#arr-ctrl)"/>
+      <text x="333" y="363" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ctrl)">status.phase = Pending (readyReplicas == 0) · requeue 30s</text>
+
+      <!-- ══════════════════════════════════════════ -->
+      <!-- PHASE 2a: MIRROR INJECT (rows 390–560)      -->
+      <!-- ══════════════════════════════════════════ -->
+      <rect x="0" y="390" width="1272" height="174" fill="oklch(0.95 0.03 300)" opacity=".2"/>
+      <text x="12" y="410" font-family="IBM Plex Mono,monospace" font-size="10" fill="var(--mirror)" letter-spacing="2" font-weight="600">① → ② MIRROR FILTER INJECTION</text>
+
+      <!-- Controller reads HTTPRoute -->
+      <text x="12" y="434" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">7</text>
+      <line x1="420" y1="436" x2="770" y2="436" stroke="var(--mirror)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr-mirror)"/>
+      <text x="593" y="429" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--mirror)">GET HTTPRoute (or GRPCRoute)</text>
+
+      <!-- Compute desired mirror filter -->
+      <rect x="348" y="448" width="144" height="66" rx="3" fill="var(--panel)" stroke="var(--mirror)" stroke-width="1"/>
+      <text x="420" y="464" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="11" fill="var(--ink)" font-weight="600">Build RequestMirror</text>
+      <text x="420" y="480" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">backendRef → {tc.Name}-capture-agent</text>
+      <text x="420" y="493" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">port: 8080 (HTTP + gRPC both)</text>
+      <text x="420" y="506" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">applied per-rule across all rules</text>
+
+      <!-- check existing filter (idempotent) -->
+      <text x="12" y="530" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">8</text>
+      <path d="M 420 514 L 420 528 L 770 528 L 770 514" fill="none" stroke="var(--mirror)" stroke-width="1.1" stroke-dasharray="3 2"/>
+      <text x="593" y="524" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--mirror)">hasHTTPMirrorFilter() per-rule idempotency check</text>
+
+      <!-- PATCH HTTPRoute with filter -->
+      <text x="12" y="556" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">9</text>
+      <line x1="420" y1="558" x2="770" y2="558" stroke="var(--mirror)" stroke-width="2" marker-end="url(#arr-mirror)"/>
+      <text x="593" y="551" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--mirror)" font-weight="500">Update() HTTPRoute — inject filters[].requestMirror per rule</text>
+
+      <!-- Route annotation added -->
+      <rect x="704" y="566" width="152" height="36" rx="3" fill="oklch(0.90 0.05 300)" stroke="var(--mirror)" stroke-width="1"/>
+      <text x="780" y="579" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--mirror)" font-weight="600">mirror filter live</text>
+      <text x="780" y="595" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="var(--ink-3)">annotation: capture.gateway.io/traffic-capture</text>
+
+      <!-- ══════════════════════════════════════════ -->
+      <!-- PHASE 2b: ACTIVE (rows 600–760)            -->
+      <!-- ══════════════════════════════════════════ -->
+      <rect x="0" y="600" width="1272" height="190" fill="oklch(0.95 0.03 150)" opacity=".3"/>
+      <text x="12" y="620" font-family="IBM Plex Mono,monospace" font-size="10" fill="var(--active)" letter-spacing="2" font-weight="600">② ACTIVE — TRAFFIC CAPTURE</text>
+
+      <!-- status → Active -->
+      <text x="12" y="644" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">10</text>
+      <line x1="420" y1="646" x2="250" y2="646" stroke="var(--active)" stroke-width="1.4" marker-end="url(#arr-active)"/>
+      <text x="333" y="639" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--active)">status.phase = Active · startTime</text>
+
+      <!-- Client request -->
+      <text x="12" y="672" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">11</text>
+      <line x1="960" y1="674" x2="790" y2="674" stroke="var(--ink-2)" stroke-width="1.8" marker-end="url(#arr)"/>
+      <text x="873" y="667" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ink-2)">HTTP/gRPC request</text>
+
+      <!-- Route → Backend (original) -->
+      <text x="12" y="700" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">12</text>
+      <line x1="780" y1="702" x2="840" y2="702" stroke="var(--ink-2)" stroke-width="1.4" marker-end="url(#arr)"/>
+      <text x="810" y="695" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">→ backend</text>
+
+      <!-- Route → Mirror copy (dashed) -->
+      <text x="12" y="726" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">13</text>
+      <line x1="780" y1="728" x2="610" y2="728" stroke="var(--active)" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-active)"/>
+      <text x="693" y="721" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--active)">mirror copy (fire-and-forget)</text>
+
+      <!-- Agent buffers and flushes -->
+      <rect x="548" y="736" width="104" height="42" rx="3" fill="var(--panel)" stroke="oklch(0.55 0.14 38)" stroke-width="1"/>
+      <text x="600" y="751" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="10" fill="var(--ink)" font-weight="600">BufferedWriter</text>
+      <text x="600" y="764" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">batch · gzip · JSONL</text>
+      <text x="600" y="775" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--ink-3)">configurable flush</text>
+
+      <!-- flush to storage -->
+      <line x1="652" y1="757" x2="1130" y2="757" stroke="var(--active)" stroke-width="1.8" marker-end="url(#arr-active)"/>
+      <text x="890" y="750" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--active)">{captureID}/{date}/{pod}-{seq}.jsonl.gz</text>
+
+      <!-- report to hub -->
+      <text x="12" y="784" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">14</text>
+      <path d="M 420 782 L 420 786 L 252 786" fill="none" stroke="var(--ctrl)" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#arr-ctrl)"/>
+      <text x="333" y="779" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ctrl)">ReportCaptureStatus (hub, best-effort)</text>
+
+      <!-- ══════════════════════════════════════════ -->
+      <!-- PHASE 3: TEARDOWN (rows 810–1020)          -->
+      <!-- ══════════════════════════════════════════ -->
+      <rect x="0" y="810" width="1272" height="228" fill="oklch(0.96 0.03 38)" opacity=".45"/>
+      <text x="12" y="830" font-family="IBM Plex Mono,monospace" font-size="10" fill="var(--teardown)" letter-spacing="2" font-weight="600">③ TEARDOWN — FINALIZER-GUARDED DELETION</text>
+
+      <!-- kubectl delete -->
+      <text x="12" y="854" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">15</text>
+      <line x1="80" y1="856" x2="230" y2="856" stroke="var(--teardown)" stroke-width="1.8" marker-end="url(#arr-teardown)"/>
+      <text x="153" y="849" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--teardown)">kubectl delete TrafficCapture</text>
+
+      <!-- API server sets deletionTimestamp -->
+      <text x="12" y="882" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">16</text>
+      <line x1="240" y1="884" x2="410" y2="884" stroke="var(--ctrl)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr-ctrl)"/>
+      <text x="328" y="877" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--ctrl)">set deletionTimestamp (finalizer blocks GC)</text>
+
+      <!-- Controller: REMOVE mirror filter -->
+      <text x="12" y="910" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">17</text>
+      <line x1="420" y1="912" x2="770" y2="912" stroke="var(--teardown)" stroke-width="2" marker-end="url(#arr-teardown)"/>
+      <text x="593" y="905" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--teardown)" font-weight="500">removeHTTPMirrorFilters() per rule · delete annotation</text>
+
+      <!-- Route annotation cleared -->
+      <rect x="704" y="920" width="152" height="36" rx="3" fill="oklch(0.96 0.03 38)" stroke="var(--teardown)" stroke-width="1"/>
+      <text x="780" y="934" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--teardown)" font-weight="600">mirror filter removed</text>
+      <text x="780" y="949" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="var(--ink-3)">error logged but non-fatal — cleanup continues</text>
+
+      <!-- traffic no longer mirrored confirmation -->
+      <path d="M 780 956 L 780 970 L 610 970" fill="none" stroke="var(--teardown)" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr-teardown)"/>
+      <text x="693" y="983" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--teardown)">traffic no longer mirrored</text>
+
+      <!-- remove finalizer → GC -->
+      <text x="12" y="1008" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">18</text>
+      <line x1="420" y1="1006" x2="250" y2="1006" stroke="var(--teardown)" stroke-width="1.4" marker-end="url(#arr-teardown)"/>
+      <text x="333" y="999" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="var(--teardown)">RemoveFinalizer() → Update() CR</text>
+
+      <!-- Deployment, Service, HPA GC confirmed -->
+      <text x="12" y="1030" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">19</text>
+      <line x1="240" y1="1028" x2="410" y2="1028" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr)"/>
+      <text x="333" y="1021" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--ink-3)">GC owned: Deployment · Service · HPA</text>
+
+      <!-- duration expiry side note -->
+      <text x="858" y="860" font-family="IBM Plex Mono,monospace" font-size="9" fill="var(--pending)">alt: duration expired</text>
+      <path d="M 870 864 L 870 884 L 432 884" fill="none" stroke="var(--pending)" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr-pending)"/>
+      <text x="651" y="879" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="var(--pending)">spec.capture.duration elapsed → setPhase(Completed) → same teardown path</text>
+
+    </svg>
+  </div>
+
+  <!-- Annotation steps -->
+  <div class="steps">
+    <div class="step">
+      <div class="step-phase" style="color:var(--pending)">
+        <span style="background:var(--pending)"></span>
+        Phase ① — Pending · Provision
+      </div>
+      <h4>Capture service spin-up</h4>
+      <ol>
+        <li>User applies <code>TrafficCapture</code> CR. If <code>spec.capture.duration</code> is set and already elapsed, controller immediately transitions to <span class="grn">Completed</span>.</li>
+        <li>Controller adds finalizer <code>capture.gateway.io/cleanup</code> first, then validates <code>CaptureStorage</code> is <span class="grn">Ready</span> — sets phase <span class="red">Failed</span> if not found, requeues 10s if not ready.</li>
+        <li><code>createOrUpdate</code> Deployment (<code>{tc.Name}-capture-agent</code>), <code>ClusterIP</code> Service (:8080 HTTP, :9090 gRPC), and CPU-based HPA (1–10 replicas). All owned by the CR via <code>SetControllerReference</code>.</li>
+        <li>Mirror filter is injected <em>in the same reconcile loop</em>, after workloads — not on a separate pass.</li>
+        <li>Status updated: phase = <span class="grn">Active</span> when <code>readyReplicas &gt; 0</code>, else <span class="vio">Pending</span>. Controller requeues every <strong>30s</strong>.</li>
+      </ol>
+    </div>
+    <div class="step">
+      <div class="step-phase" style="color:var(--mirror)">
+        <span style="background:var(--mirror)"></span>
+        Phase ① → ② — Mirror inject · Active
+      </div>
+      <h4>RequestMirror filter injection</h4>
+      <ol>
+        <li>Controller calls <code>AddMirrorFilter()</code> dispatching on <code>targetRef.Kind</code>: <code>HTTPRoute</code> or <code>GRPCRoute</code>.</li>
+        <li>Fetches the Route, then iterates <strong>every rule</strong> — each rule gets its own mirror filter appended to <code>filters[]</code>.</li>
+        <li>Per-rule idempotency: <code>hasHTTPMirrorFilter()</code> checks <code>backendRef.Name == "{tc.Name}-capture-agent"</code> before appending. No-op if already present.</li>
+        <li>Calls <code>cl.Update()</code> on the Route. Sets annotation <code>capture.gateway.io/traffic-capture: namespace/name</code>. Both HTTP and GRPCRoute mirrors use <strong>port 8080</strong>.</li>
+        <li>Gateway controller (Envoy etc.) picks up the updated Route and starts duplicating requests fire-and-forget to the agent Service.</li>
+      </ol>
+    </div>
+    <div class="step">
+      <div class="step-phase" style="color:var(--teardown)">
+        <span style="background:var(--teardown)"></span>
+        Phase ③ — Teardown · Finalizer
+      </div>
+      <h4>Finalizer-guarded mirror removal</h4>
+      <ol>
+        <li>Triggered by <code>kubectl delete</code> or <code>spec.capture.duration</code> expiry. API server sets <code>deletionTimestamp</code>; finalizer blocks GC.</li>
+        <li>Reconciler detects non-zero <code>deletionTimestamp</code> → calls <code>reconcileDelete()</code>.</li>
+        <li>Calls <code>RemoveMirrorFilter()</code>: iterates all rules, strips matching <code>RequestMirror</code> filters by agent service name, deletes annotation, calls <code>cl.Update()</code>. <strong>Errors are logged but non-fatal</strong> — cleanup always continues.</li>
+        <li>Calls <code>controllerutil.RemoveFinalizer()</code> then <code>r.Update()</code>. Kubernetes GC cascades deletion of owned <code>Deployment</code>, <code>Service</code>, and <code>HPA</code>.</li>
+        <li>CR is fully deleted. In-flight <code>BufferedWriter</code> batches are flushed by the agent pod during its own graceful shutdown.</li>
+      </ol>
+    </div>
+  </div>
+
+  <footer class="doc">
+    <div>kapture / capture-lifecycle.svg</div>
+    <div>idempotent mirror inject · finalizer-safe teardown · HPA-scaled agents</div>
+  </footer>
+
+</div>
+
+<script>
+  window.addEventListener('message', e => {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === '__activate_edit_mode') document.getElementById('tweaks').classList.add('show');
+    if (e.data.type === '__deactivate_edit_mode') document.getElementById('tweaks').classList.remove('show');
+  });
+  try { window.parent.postMessage({type:'__edit_mode_available'}, '*'); } catch(_){}
+
+  document.getElementById('actor-tog').onclick = function(){
+    this.classList.toggle('on');
+    document.body.dataset.actors = this.classList.contains('on') ? 'on' : 'off';
+  };
+  document.getElementById('notes-tog').onclick = function(){
+    this.classList.toggle('on');
+    document.body.dataset.notes = this.classList.contains('on') ? 'on' : 'off';
+  };
+</script>
+</body>
+</html>

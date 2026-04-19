@@ -63,6 +63,10 @@ Client → Gateway → HTTPRoute ──┬──→ Backend Service (original)
 4. Mirrored traffic flows to capture agents, which batch and write to storage
 5. On deletion, the finalizer removes the mirror filter and owned resources are garbage collected
 
+For a detailed end-to-end sequence diagram of provisioning, mirror filter
+injection, active capture, and finalizer-guarded teardown, open
+[docs/design/capture-lifecycle.html](docs/design/capture-lifecycle.html) in a browser.
+
 ## Components
 
 ### Hub Controller (`cmd/hub`)
