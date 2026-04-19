@@ -221,7 +221,6 @@ func parseStorageConfig(storageType, rawJSON string) (any, error) {
 			return nil, fmt.Errorf("parse plugin config: %w", err)
 		}
 		cfg.Path = firstNonEmpty(cfg.Path, os.Getenv("PLUGIN_PATH"))
-		cfg.AgentPod = firstNonEmpty(cfg.AgentPod, os.Getenv("POD_NAME"), os.Getenv("HOSTNAME"))
 		return cfg, nil
 	default:
 		return nil, fmt.Errorf("unsupported storage type %q", storageType)
