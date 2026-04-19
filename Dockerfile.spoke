@@ -2,7 +2,7 @@ FROM golang:1.26 AS builder
 
 WORKDIR /src
 COPY . .
-RUN go mod download
+RUN go mod tidy
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
