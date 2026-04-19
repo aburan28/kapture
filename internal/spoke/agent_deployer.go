@@ -2,6 +2,7 @@ package spoke
 
 import (
 	"fmt"
+	"os"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -153,7 +154,16 @@ func agentLabels(tc *capturev1alpha1.TrafficCapture) map[string]string {
 func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.CaptureStorage) []corev1.EnvVar {
 	envs := []corev1.EnvVar{
 		{Name: "CAPTURE_ID", Value: fmt.Sprintf("%s/%s", tc.Namespace, tc.Name)},
+		{Name: "CAPTURE_NAMESPACE", Value: tc.Namespace},
+		{Name: "CAPTURE_NAME", Value: tc.Name},
+		{Name: "CAPTURE_TARGET_KIND", Value: string(tc.Spec.TargetRef.Kind)},
+		{Name: "CAPTURE_TARGET_NAME", Value: string(tc.Spec.TargetRef.Name)},
+		{Name: "CAPTURE_STORAGE_NAME", Value: string(tc.Spec.StorageRef.Name)},
 		{Name: "STORAGE_TYPE", Value: string(storage.Spec.Type)},
+	}
+
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		envs = append(envs, corev1.EnvVar{Name: "DATABASE_URL", Value: databaseURL})
 	}
 
 	switch storage.Spec.Type {
