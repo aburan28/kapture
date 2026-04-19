@@ -65,23 +65,7 @@ func BuildDeployment(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha
 								{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP},
 								{Name: "grpc", ContainerPort: 9090, Protocol: corev1.ProtocolTCP},
 							},
-							Env: buildEnvVars(tc, storage),
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
-									Path: "/healthz",
-									Port: intstr.FromInt(8081),
-								}},
-								InitialDelaySeconds: 2,
-								PeriodSeconds:       5,
-							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
-									Path: "/healthz",
-									Port: intstr.FromInt(8081),
-								}},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-							},
+							Env:       buildEnvVars(tc, storage),
 							Resources: defaultResources(),
 						},
 					},
