@@ -64,13 +64,12 @@ func BuildDeployment(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha
 							Ports: []corev1.ContainerPort{
 								{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP},
 								{Name: "grpc", ContainerPort: 9090, Protocol: corev1.ProtocolTCP},
-								{Name: "health", ContainerPort: 8081, Protocol: corev1.ProtocolTCP},
 							},
 							Env: buildEnvVars(tc, storage),
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
 									Path: "/healthz",
-									Port: intstr.FromString("health"),
+									Port: intstr.FromInt(8081),
 								}},
 								InitialDelaySeconds: 2,
 								PeriodSeconds:       5,
@@ -78,7 +77,7 @@ func BuildDeployment(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
 									Path: "/healthz",
-									Port: intstr.FromString("health"),
+									Port: intstr.FromInt(8081),
 								}},
 								InitialDelaySeconds: 10,
 								PeriodSeconds:       10,
@@ -107,7 +106,7 @@ func BuildService(tc *capturev1alpha1.TrafficCapture) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{Name: "http", Port: 8080, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
 				{Name: "grpc", Port: 9090, TargetPort: intstr.FromString("grpc"), Protocol: corev1.ProtocolTCP},
-				{Name: "health", Port: 8081, TargetPort: intstr.FromString("health"), Protocol: corev1.ProtocolTCP},
+				{Name: "health", Port: 8081, TargetPort: intstr.FromInt(8081), Protocol: corev1.ProtocolTCP},
 			},
 		},
 	}
