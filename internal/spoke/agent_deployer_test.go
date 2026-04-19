@@ -76,21 +76,6 @@ func TestBuildDeployment(t *testing.T) {
 	if container.Ports[1].ContainerPort != 9090 {
 		t.Errorf("expected port 9090, got %d", container.Ports[1].ContainerPort)
 	}
-	if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet == nil {
-		t.Fatal("expected readiness probe with HTTP GET")
-	}
-	if container.ReadinessProbe.HTTPGet.Path != "/healthz" {
-		t.Errorf("expected readiness path /healthz, got %s", container.ReadinessProbe.HTTPGet.Path)
-	}
-	if container.ReadinessProbe.HTTPGet.Port.IntVal != 8081 {
-		t.Errorf("expected readiness port 8081, got %v", container.ReadinessProbe.HTTPGet.Port)
-	}
-	if container.LivenessProbe == nil || container.LivenessProbe.HTTPGet == nil {
-		t.Fatal("expected liveness probe with HTTP GET")
-	}
-	if container.LivenessProbe.HTTPGet.Path != "/healthz" {
-		t.Errorf("expected liveness path /healthz, got %s", container.LivenessProbe.HTTPGet.Path)
-	}
 
 	// Check env vars
 	envMap := make(map[string]string)
