@@ -147,6 +147,9 @@ func TestS3WriterRecordsArtifactMetadata(t *testing.T) {
 	if artifact.Key != "prefix/default/orders/2026-03-15/agent-a-000001.jsonl.gz" {
 		t.Fatalf("artifact key = %q", artifact.Key)
 	}
+	if !artifact.CreatedAt.Equal(fixedNow) {
+		t.Fatalf("artifact createdAt = %s, want %s", artifact.CreatedAt, fixedNow)
+	}
 	if artifact.SizeBytes <= 0 || artifact.SHA256 == "" {
 		t.Fatalf("expected size and checksum, got size=%d sha=%q", artifact.SizeBytes, artifact.SHA256)
 	}
