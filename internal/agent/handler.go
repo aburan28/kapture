@@ -27,19 +27,23 @@ type CapturedHTTPRequest struct {
 type CaptureHandler struct {
 	writer       storage.Writer
 	maxBodyBytes int64
+	filter       *RequestFilter
 	log          *slog.Logger
 
 	// Metrics
-	requestsTotal   atomic.Int64
-	requestsDropped atomic.Int64
-	bytesReceived   atomic.Int64
+	requestsTotal    atomic.Int64
+	requestsFiltered atomic.Int64
+	requestsDropped  atomic.Int64
+	bytesReceived    atomic.Int64
 }
 
 // CaptureHandlerConfig configures a CaptureHandler.
 type CaptureHandlerConfig struct {
 	Writer       storage.Writer
 	MaxBodyBytes int64
-	Logger       *slog.Logger
+	// Filter optionally narrows which requests are captured; nil captures all.
+	Filter *RequestFilter
+	Logger *slog.Logger
 }
 
 // NewCaptureHandler creates a CaptureHandler with the given configuration.
@@ -53,6 +57,7 @@ func NewCaptureHandler(cfg CaptureHandlerConfig) *CaptureHandler {
 	return &CaptureHandler{
 		writer:       cfg.Writer,
 		maxBodyBytes: cfg.MaxBodyBytes,
+		filter:       cfg.Filter,
 		log:          cfg.Logger,
 	}
 }
@@ -62,6 +67,11 @@ func NewCaptureHandler(cfg CaptureHandlerConfig) *CaptureHandler {
 // the request is dropped and a metric counter is incremented.
 func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) error {
 	h.requestsTotal.Add(1)
+
+	if !h.filter.Matches(req) {
+		h.requestsFiltered.Add(1)
+		return nil
+	}
 
 	body, err := io.ReadAll(io.LimitReader(req.Body, h.maxBodyBytes+1))
 	if err != nil {
@@ -106,7 +116,7 @@ func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) e
 }
 
 // Metrics returns current handler metrics.
-func (h *CaptureHandler) Metrics() (total, dropped, bytesRecv int64) {
-	return h.requestsTotal.Load(), h.requestsDropped.Load(), h.bytesReceived.Load()
+func (h *CaptureHandler) Metrics() (total, filtered, dropped, bytesRecv int64) {
+	return h.requestsTotal.Load(), h.requestsFiltered.Load(), h.requestsDropped.Load(), h.bytesReceived.Load()
 }
 

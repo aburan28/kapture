@@ -234,11 +234,14 @@ func (s *AgentServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // handleMetrics serves Prometheus-style metrics.
 func (s *AgentServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
-	total, dropped, bytesRecv := s.handler.Metrics()
+	total, filtered, dropped, bytesRecv := s.handler.Metrics()
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintf(w, "# HELP capture_agent_requests_total Total captured requests\n")
 	fmt.Fprintf(w, "# TYPE capture_agent_requests_total counter\n")
 	fmt.Fprintf(w, "capture_agent_requests_total %d\n", total)
+	fmt.Fprintf(w, "# HELP capture_agent_requests_filtered_total Requests excluded by capture filters\n")
+	fmt.Fprintf(w, "# TYPE capture_agent_requests_filtered_total counter\n")
+	fmt.Fprintf(w, "capture_agent_requests_filtered_total %d\n", filtered)
 	fmt.Fprintf(w, "# HELP capture_agent_requests_dropped_total Dropped requests\n")
 	fmt.Fprintf(w, "# TYPE capture_agent_requests_dropped_total counter\n")
 	fmt.Fprintf(w, "capture_agent_requests_dropped_total %d\n", dropped)

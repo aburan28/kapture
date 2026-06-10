@@ -1,6 +1,7 @@
 package spoke
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -236,6 +237,21 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 	}
 	if tc.Spec.Capture.MaxBodyBytes != nil {
 		envs = append(envs, corev1.EnvVar{Name: "CAPTURE_MAX_BODY_BYTES", Value: fmt.Sprintf("%d", *tc.Spec.Capture.MaxBodyBytes)})
+	}
+
+	// Capture filters, enforced by the agent
+	if tc.Spec.Filters != nil {
+		if tc.Spec.Filters.PathPrefix != nil && *tc.Spec.Filters.PathPrefix != "" {
+			envs = append(envs, corev1.EnvVar{Name: "FILTER_PATH_PREFIX", Value: *tc.Spec.Filters.PathPrefix})
+		}
+		if len(tc.Spec.Filters.Headers) > 0 {
+			if raw, err := json.Marshal(tc.Spec.Filters.Headers); err == nil {
+				envs = append(envs, corev1.EnvVar{Name: "FILTER_HEADERS", Value: string(raw)})
+			}
+		}
+		if tc.Spec.Filters.Percentage != nil {
+			envs = append(envs, corev1.EnvVar{Name: "FILTER_PERCENTAGE", Value: fmt.Sprintf("%d", *tc.Spec.Filters.Percentage)})
+		}
 	}
 
 	return envs
