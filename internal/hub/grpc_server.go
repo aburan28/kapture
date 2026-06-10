@@ -23,6 +23,9 @@ const (
 	DefaultHeartbeatInterval = 30
 	// SpokeTimeout is how long after the last heartbeat a spoke is considered disconnected.
 	SpokeTimeout = 90 * time.Second
+	// DirectiveBufferSize is how many directives can be queued per spoke
+	// before SendDirective starts rejecting with ResourceExhausted.
+	DirectiveBufferSize = 32
 )
 
 // spokeEntry tracks a connected spoke in the in-memory registry.
@@ -30,6 +33,12 @@ type spokeEntry struct {
 	info          *hubv1.SpokeInfo
 	lastHeartbeat time.Time
 	captures      map[string]*hubv1.CaptureStatusSummary // key: "namespace/name"
+
+	// directives buffers hub-initiated directives until the spoke's
+	// WatchDirectives stream picks them up. The channel is never closed;
+	// done signals watchers that the entry has been retired.
+	directives chan *hubv1.CaptureDirective
+	done       chan struct{}
 }
 
 // Server implements hubv1.HubServiceServer and manages spoke registration,
@@ -100,6 +109,11 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Retire any previous registration so stale directive watchers terminate.
+	if existing, ok := s.spokes[req.SpokeId]; ok {
+		close(existing.done)
+	}
+
 	s.spokes[req.SpokeId] = &spokeEntry{
 		info: &hubv1.SpokeInfo{
 			SpokeId:        req.SpokeId,
@@ -111,6 +125,8 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 		},
 		lastHeartbeat: now,
 		captures:      make(map[string]*hubv1.CaptureStatusSummary),
+		directives:    make(chan *hubv1.CaptureDirective, DirectiveBufferSize),
+		done:          make(chan struct{}),
 	}
 
 	return &hubv1.RegisterSpokeResponse{
@@ -158,31 +174,94 @@ func (s *Server) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.spokes[req.SpokeId]; !ok {
+	entry, ok := s.spokes[req.SpokeId]
+	if !ok {
 		return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
 	}
 
+	close(entry.done)
 	delete(s.spokes, req.SpokeId)
 	return &hubv1.DeregisterSpokeResponse{Acknowledged: true}, nil
 }
 
 // WatchDirectives is a server-streaming RPC for hub-initiated capture commands.
-// Currently a no-op that keeps the stream open until the client disconnects.
+// Directives queued via SendDirective/BroadcastDirective are streamed to the
+// spoke until the client disconnects or the spoke is deregistered.
 func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.ServerStreamingServer[hubv1.WatchDirectivesResponse]) error {
 	if req.GetSpokeId() == "" {
 		return status.Error(codes.InvalidArgument, "spoke_id is required")
 	}
 
 	s.mu.RLock()
-	_, ok := s.spokes[req.SpokeId]
+	entry, ok := s.spokes[req.SpokeId]
 	s.mu.RUnlock()
 	if !ok {
 		return status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
 	}
 
-	// Block until context is done (client disconnects or server shuts down).
-	<-stream.Context().Done()
-	return stream.Context().Err()
+	for {
+		select {
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case <-entry.done:
+			return status.Errorf(codes.Aborted, "spoke %q deregistered", req.SpokeId)
+		case directive := <-entry.directives:
+			if err := stream.Send(&hubv1.WatchDirectivesResponse{Directive: directive}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// SendDirective queues a directive for delivery to a single spoke. The
+// directive is buffered until the spoke's WatchDirectives stream consumes it.
+func (s *Server) SendDirective(spokeID string, directive *hubv1.CaptureDirective) error {
+	if spokeID == "" {
+		return status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if directive == nil {
+		return status.Error(codes.InvalidArgument, "directive is required")
+	}
+
+	s.mu.RLock()
+	entry, ok := s.spokes[spokeID]
+	s.mu.RUnlock()
+	if !ok {
+		return status.Errorf(codes.NotFound, "spoke %q not registered", spokeID)
+	}
+
+	select {
+	case entry.directives <- directive:
+		return nil
+	default:
+		return status.Errorf(codes.ResourceExhausted, "directive buffer full for spoke %q", spokeID)
+	}
+}
+
+// BroadcastDirective queues a directive for every registered spoke and
+// returns the number of spokes it was queued to. Spokes with a full
+// directive buffer are skipped.
+func (s *Server) BroadcastDirective(directive *hubv1.CaptureDirective) int {
+	if directive == nil {
+		return 0
+	}
+
+	s.mu.RLock()
+	entries := make([]*spokeEntry, 0, len(s.spokes))
+	for _, entry := range s.spokes {
+		entries = append(entries, entry)
+	}
+	s.mu.RUnlock()
+
+	queued := 0
+	for _, entry := range entries {
+		select {
+		case entry.directives <- directive:
+			queued++
+		default:
+		}
+	}
+	return queued
 }
 
 // --- Status reporting ---
