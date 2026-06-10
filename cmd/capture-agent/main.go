@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +37,9 @@ func main() {
 		maxBodyBytes     = flag.Int64("max-body-bytes", 1<<20, "Max request body size in bytes")
 		batchSize        = flag.Int("batch-size", 100, "Buffered writer batch size")
 		flushInterval    = flag.Duration("flush-interval", 5*time.Second, "Buffered writer flush interval")
+		filterPathPrefix = flag.String("filter-path-prefix", envOr("FILTER_PATH_PREFIX", ""), "Only capture requests whose path starts with this prefix")
+		filterHeaders    = flag.String("filter-headers", envOr("FILTER_HEADERS", ""), `Header filters as JSON array, e.g. [{"name":"x-debug","value":"true"}]`)
+		filterPercentage = flag.Int("filter-percentage", envIntOr("FILTER_PERCENTAGE", 100), "Percentage of requests to capture (0-100)")
 	)
 	flag.Parse()
 
@@ -119,9 +123,24 @@ func main() {
 		Logger:        log,
 	})
 
+	headerFilters, err := agent.ParseHeaderFilters(*filterHeaders)
+	if err != nil {
+		log.Error("failed to parse header filters", "error", err)
+		os.Exit(1)
+	}
+	var requestFilter *agent.RequestFilter
+	if *filterPathPrefix != "" || len(headerFilters) > 0 || *filterPercentage < 100 {
+		requestFilter = agent.NewRequestFilter(agent.RequestFilterConfig{
+			PathPrefix: *filterPathPrefix,
+			Headers:    headerFilters,
+			Percentage: *filterPercentage,
+		})
+	}
+
 	handler := agent.NewCaptureHandler(agent.CaptureHandlerConfig{
 		Writer:       bufferedWriter,
 		MaxBodyBytes: *maxBodyBytes,
+		Filter:       requestFilter,
 		Logger:       log,
 	})
 
@@ -269,6 +288,18 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func firstNonEmpty(values ...string) string {

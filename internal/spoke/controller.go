@@ -63,13 +63,15 @@ func (r *TrafficCaptureReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// A completed capture stays torn down; don't re-provision agents or filters.
+	if tc.Status.Phase == capturev1alpha1.TrafficCapturePhaseCompleted {
+		return ctrl.Result{}, nil
+	}
+
 	// Check duration expiration
-	if tc.Spec.Capture.Duration != nil && tc.Status.StartTime != nil {
-		duration, err := time.ParseDuration(*tc.Spec.Capture.Duration)
-		if err == nil && time.Since(tc.Status.StartTime.Time) > duration {
-			logger.Info("TrafficCapture duration expired, completing")
-			return r.setPhase(ctx, tc, capturev1alpha1.TrafficCapturePhaseCompleted)
-		}
+	if expired, _ := captureExpired(tc); expired {
+		logger.Info("TrafficCapture duration expired, completing")
+		return r.completeCapture(ctx, tc)
 	}
 
 	// Step 1: Validate CaptureStorage exists and is Ready
@@ -191,14 +193,61 @@ func (r *TrafficCaptureReconciler) updateStatus(ctx context.Context, tc *capture
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// Requeue sooner when the capture duration is about to expire so the
+	// mirror filter is removed promptly.
+	requeue := 30 * time.Second
+	if expired, remaining := captureExpired(tc); !expired && remaining > 0 && remaining < requeue {
+		requeue = remaining
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
-func (r *TrafficCaptureReconciler) setPhase(ctx context.Context, tc *capturev1alpha1.TrafficCapture, phase capturev1alpha1.TrafficCapturePhase) (ctrl.Result, error) {
-	tc.Status.Phase = phase
+// captureExpired reports whether the capture's configured duration has
+// elapsed, and how much time remains when it has not. Captures without a
+// duration or start time never expire.
+func captureExpired(tc *capturev1alpha1.TrafficCapture) (bool, time.Duration) {
+	if tc.Spec.Capture.Duration == nil || tc.Status.StartTime == nil {
+		return false, 0
+	}
+	duration, err := time.ParseDuration(*tc.Spec.Capture.Duration)
+	if err != nil {
+		return false, 0
+	}
+	remaining := duration - time.Since(tc.Status.StartTime.Time)
+	return remaining <= 0, remaining
+}
+
+// completeCapture stops mirroring and removes agent resources once the
+// capture duration has elapsed. Captured data remains in storage.
+func (r *TrafficCaptureReconciler) completeCapture(ctx context.Context, tc *capturev1alpha1.TrafficCapture) (ctrl.Result, error) {
+	if err := RemoveMirrorFilter(ctx, r.Client, tc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove mirror filter: %w", err)
+	}
+
+	meta := metav1.ObjectMeta{Name: AgentDeploymentName(tc), Namespace: tc.Namespace}
+	for _, obj := range []client.Object{
+		&autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: meta},
+		&appsv1.Deployment{ObjectMeta: meta},
+		&corev1.Service{ObjectMeta: meta},
+	} {
+		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, fmt.Errorf("delete agent %T: %w", obj, err)
+		}
+	}
+
+	tc.Status.Phase = capturev1alpha1.TrafficCapturePhaseCompleted
+	setCondition(&tc.Status.Conditions, metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionFalse,
+		Reason:             "CaptureCompleted",
+		Message:            "capture duration elapsed; mirroring stopped and agents removed",
+		LastTransitionTime: metav1.Now(),
+	})
 	if err := r.Status().Update(ctx, tc); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	r.reportToHub(ctx, tc)
 	return ctrl.Result{}, nil
 }
 

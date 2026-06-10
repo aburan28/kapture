@@ -253,7 +253,7 @@ func TestHandle_WriterError_DropsAndReturnsError(t *testing.T) {
 		t.Fatalf("expected write error, got %v", err)
 	}
 
-	total, dropped, _ := h.Metrics()
+	total, _, dropped, _ := h.Metrics()
 	if total != 1 {
 		t.Errorf("expected total=1, got %d", total)
 	}
@@ -279,7 +279,7 @@ func TestHandle_BodyReadError_DropsAndReturnsError(t *testing.T) {
 		t.Fatal("expected error from body read failure")
 	}
 
-	total, dropped, _ := h.Metrics()
+	total, _, dropped, _ := h.Metrics()
 	if total != 1 {
 		t.Errorf("expected total=1, got %d", total)
 	}
@@ -321,7 +321,7 @@ func TestMetrics_AfterMultipleCalls(t *testing.T) {
 		_ = h.Handle(context.Background(), req)
 	}
 
-	total, dropped, bytesRecv := h.Metrics()
+	total, _, dropped, bytesRecv := h.Metrics()
 	if total != 5 {
 		t.Errorf("expected total=5, got %d", total)
 	}
@@ -364,7 +364,7 @@ func TestMetrics_InitiallyZero(t *testing.T) {
 	mw := &mockWriter{}
 	h := NewCaptureHandler(CaptureHandlerConfig{Writer: mw, Logger: discardLogger()})
 
-	total, dropped, bytesRecv := h.Metrics()
+	total, _, dropped, bytesRecv := h.Metrics()
 	if total != 0 || dropped != 0 || bytesRecv != 0 {
 		t.Errorf("expected all zero metrics, got total=%d dropped=%d bytes=%d", total, dropped, bytesRecv)
 	}
