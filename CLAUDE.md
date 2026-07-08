@@ -8,15 +8,19 @@ Kapture is a Kubernetes traffic capture controller that enables non-invasive, de
 
 ```
 Hub Cluster (central orchestration via gRPC)
-  └── Spoke Clusters (per-cluster controllers)
-       └── Capture Agents (traffic sink servers)
-            └── Storage Backends (S3/GCS/EFS/EBS/Plugin)
+  └── Cells (named groupings of spokes, e.g. AZ or deployment ring)
+       └── Spoke Clusters (per-cluster controllers, register with a cell)
+            ├── Capture Agents (traffic sink servers)
+            │    └── Storage Backends (S3/GCS/EFS/EBS/Plugin)
+            └── Replay Workers (Jobs running replay-engine shards)
 ```
 
-Three Custom Resources:
+Five Custom Resources:
 - **TrafficCapture** (namespaced) - Defines what traffic to capture from HTTPRoute/GRPCRoute
 - **CaptureStorage** (namespaced) - Configures storage backend (S3, GCS, EFS, EBS, Plugin)
 - **CaptureHub** (cluster-scoped) - Central hub for multi-cluster coordination
+- **TrafficReplay** (namespaced, spoke) - Replays captured data at a target; one shard of a load test or standalone
+- **CaptureLoadTest** (namespaced, hub) - Distributed load test fanned out across cells/spokes (see `docs/multi-cell-load-testing.md`)
 
 ## Directory Structure
 
@@ -139,7 +143,9 @@ E2E pipeline in `.github/workflows/e2e.yaml` deploys to a Kind cluster.
 | `proto/hub/v1/hub.proto` | gRPC service definition - regenerate after changes |
 | `internal/spoke/controller.go` | Main spoke reconcilers (TrafficCapture + CaptureStorage) |
 | `internal/spoke/mirror.go` | HTTPRoute/GRPCRoute RequestMirror filter injection |
-| `internal/hub/grpc_server.go` | Hub gRPC service implementation |
+| `internal/spoke/replay_controller.go` | TrafficReplay reconciler (runs replay-engine Jobs) |
+| `internal/hub/grpc_server.go` | Hub gRPC service implementation (spokes, cells, replays) |
+| `internal/hub/loadtest_controller.go` | CaptureLoadTest coordinator (shard fan-out across cells) |
 | `internal/storage/interface.go` | Storage Writer interface definition |
 | `internal/storage/factory.go` | Storage backend factory |
 | `charts/kapture/values.yaml` | Helm chart default values |

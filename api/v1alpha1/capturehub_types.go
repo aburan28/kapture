@@ -34,10 +34,28 @@ type CaptureHubSpec struct {
 // CaptureHubSpokeStatus summarizes an attached spoke cluster.
 type CaptureHubSpokeStatus struct {
 	Name string `json:"name"`
+	// Cell is the deployment cell the spoke registered under.
+	// +optional
+	Cell string `json:"cell,omitempty"`
 	// +optional
 	LastHeartbeat *metav1.Time `json:"lastHeartbeat,omitempty"`
 	// +optional
 	ActiveCaptures int32 `json:"activeCaptures,omitempty"`
+	// +optional
+	ActiveReplays int32 `json:"activeReplays,omitempty"`
+}
+
+// CaptureHubCellStatus aggregates the spokes registered under one cell.
+type CaptureHubCellStatus struct {
+	Name string `json:"name"`
+	// +optional
+	ConnectedSpokes int32 `json:"connectedSpokes,omitempty"`
+	// +optional
+	TotalSpokes int32 `json:"totalSpokes,omitempty"`
+	// +optional
+	ActiveCaptures int32 `json:"activeCaptures,omitempty"`
+	// +optional
+	ActiveReplays int32 `json:"activeReplays,omitempty"`
 }
 
 // CaptureHubStatus defines the observed state of CaptureHub.
@@ -47,7 +65,12 @@ type CaptureHubStatus struct {
 	// +optional
 	ActiveCaptures int32 `json:"activeCaptures,omitempty"`
 	// +optional
+	ActiveReplays int32 `json:"activeReplays,omitempty"`
+	// +optional
 	Spokes []CaptureHubSpokeStatus `json:"spokes,omitempty"`
+	// Cells aggregates connected spokes by their registered cell.
+	// +optional
+	Cells []CaptureHubCellStatus `json:"cells,omitempty"`
 }
 
 // CaptureHub defines hub-wide capture controller configuration.

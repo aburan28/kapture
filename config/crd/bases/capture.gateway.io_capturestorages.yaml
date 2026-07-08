@@ -140,6 +140,7 @@ spec:
                 description: PluginConfig defines Go plugin storage settings.
                 properties:
                   config:
+                    type: object
                     x-kubernetes-preserve-unknown-fields: true
                   path:
                     type: string

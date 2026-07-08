@@ -104,6 +104,9 @@ spoke:
   hub:
     # -- gRPC address of the hub (e.g. hub-service.capture-system.svc:9443)
     address: ""
+  # -- Deployment cell this spoke registers under. Cells let the hub target
+  # captures and load tests at a subset of the fleet. Empty means no cell.
+  cell: ""
   # -- Node selector for spoke pods
   nodeSelector: {}
   # -- Tolerations for spoke pods
@@ -112,6 +115,12 @@ spoke:
 agent:
   image:
     repository: kapture/agent
+    tag: "dev"
+    pullPolicy: IfNotPresent
+
+replayEngine:
+  image:
+    repository: kapture/replay-engine
     tag: "dev"
     pullPolicy: IfNotPresent
 

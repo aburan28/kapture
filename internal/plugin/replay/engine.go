@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -58,6 +59,14 @@ type EngineConfig struct {
 	// Concurrency is the number of parallel senders. Defaults to 1.
 	Concurrency int
 
+	// ShardIndex and ShardCount split the capture across multiple engines
+	// for distributed load tests. An engine with shard {index: i, count: n}
+	// replays only requests whose hashed request ID modulo n equals i, so
+	// n engines with the same count cover the capture exactly once.
+	// ShardCount <= 1 disables sharding.
+	ShardIndex int
+	ShardCount int
+
 	// Logger for engine operations. Uses slog.Default() if nil.
 	Logger *slog.Logger
 }
@@ -75,13 +84,16 @@ type Engine struct {
 	ratePerSecond float64
 	timeScale     float64
 	concurrency   int
+	shardIndex    uint64
+	shardCount    uint64
 	log           *slog.Logger
 
 	// Runtime state
-	sent      atomic.Int64
-	errors    atomic.Int64
-	filtered  atomic.Int64
-	running   atomic.Bool
+	sent         atomic.Int64
+	errors       atomic.Int64
+	filtered     atomic.Int64
+	shardSkipped atomic.Int64
+	running      atomic.Bool
 }
 
 // NewEngine creates a replay Engine from the given config.
@@ -104,6 +116,14 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 	if cfg.ResultHandler == nil {
 		cfg.ResultHandler = NewDefaultResultHandler(cfg.Logger)
 	}
+	if cfg.ShardCount > 1 {
+		if cfg.ShardIndex < 0 || cfg.ShardIndex >= cfg.ShardCount {
+			return nil, fmt.Errorf("shard index %d out of range [0, %d)", cfg.ShardIndex, cfg.ShardCount)
+		}
+	} else {
+		cfg.ShardIndex = 0
+		cfg.ShardCount = 1
+	}
 
 	return &Engine{
 		reader:        cfg.Reader,
@@ -115,6 +135,8 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		ratePerSecond: cfg.RatePerSecond,
 		timeScale:     cfg.TimeScale,
 		concurrency:   cfg.Concurrency,
+		shardIndex:    uint64(cfg.ShardIndex),
+		shardCount:    uint64(cfg.ShardCount),
 		log:           cfg.Logger,
 	}, nil
 }
@@ -172,6 +194,21 @@ func (e *Engine) Progress() (sent, errored, filtered int64) {
 	return e.sent.Load(), e.errors.Load(), e.filtered.Load()
 }
 
+// ShardSkipped returns how many requests were skipped because they belong
+// to other shards.
+func (e *Engine) ShardSkipped() int64 {
+	return e.shardSkipped.Load()
+}
+
+// shardOf deterministically assigns a request ID to a shard using FNV-1a.
+// Every engine must use the same function so shards are disjoint and
+// exhaustive across workers.
+func shardOf(requestID string, shardCount uint64) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(requestID))
+	return h.Sum64() % shardCount
+}
+
 func (e *Engine) readLoop(ctx context.Context, out chan<- *storage.CapturedRequest) error {
 	var prevTimestamp time.Time
 	var limiter *time.Ticker
@@ -195,6 +232,15 @@ func (e *Engine) readLoop(ctx context.Context, out chan<- *storage.CapturedReque
 		}
 		if err != nil {
 			return err
+		}
+
+		// Shard filter: skip requests owned by other shards. Skipped
+		// requests do not advance the original-timing clock, so each shard
+		// reproduces the recorded timeline of its own subset and all shards
+		// together reproduce the recorded aggregate QPS.
+		if e.shardCount > 1 && shardOf(req.ID, e.shardCount) != e.shardIndex {
+			e.shardSkipped.Add(1)
+			continue
 		}
 
 		// Apply transformers.

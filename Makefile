@@ -1,11 +1,19 @@
-.PHONY: generate generate-proto build test docker-build lint
+.PHONY: generate generate-proto generate-deepcopy generate-crds build test docker-build lint
 
-generate: generate-proto
-	@echo "TODO: run controller-gen for deepcopy generation and CRD manifests"
+CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5
+
+generate: generate-proto generate-deepcopy generate-crds
 
 generate-proto:
 	buf lint
 	buf generate
+
+generate-deepcopy:
+	$(CONTROLLER_GEN) object paths="./api/v1alpha1/..."
+
+generate-crds:
+	$(CONTROLLER_GEN) crd paths="./api/v1alpha1/..." output:crd:artifacts:config=config/crd/bases
+	cp config/crd/bases/*.yaml charts/kapture/crds/
 
 build:
 	go build ./...

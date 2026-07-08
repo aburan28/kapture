@@ -112,6 +112,34 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              plugins:
+                description: |-
+                  Plugins are payload processing plugins applied in order between
+                  capture and storage. Each plugin can transform, filter, or observe
+                  captured requests.
+                items:
+                  description: PayloadPluginRef references a named payload plugin
+                    to apply in the capture pipeline.
+                  properties:
+                    config:
+                      description: Config is plugin-specific configuration.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    name:
+                      description: Name is the registered plugin name (e.g., "redact",
+                        "sample", "enrich").
+                      type: string
+                    onError:
+                      default: drop
+                      enum:
+                      - drop
+                      - skip
+                      - abort
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               storageRef:
                 description: CaptureStorageReference references a CaptureStorage in
                   the same namespace.
