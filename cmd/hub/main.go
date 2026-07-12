@@ -48,11 +48,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&hub.CaptureHubReconciler{
+	hubReconciler := &hub.CaptureHubReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("CaptureHub"),
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err := hubReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CaptureHub")
+		os.Exit(1)
+	}
+
+	if err := (&hub.CaptureLoadTestReconciler{
+		Client:         mgr.GetClient(),
+		Log:            ctrl.Log.WithName("controllers").WithName("CaptureLoadTest"),
+		ServerProvider: hubReconciler.GetServer,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "CaptureLoadTest")
 		os.Exit(1)
 	}
 

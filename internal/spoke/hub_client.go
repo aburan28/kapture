@@ -20,19 +20,29 @@ type HubClient struct {
 	hubAddress string
 	spokeName  string
 	clusterID  string
+	cell       string
 	spokeID    string
 	tlsConfig  *tls.Config
 
 	conn   *grpc.ClientConn
 	client hubv1.HubServiceClient
 
-	mu             sync.RWMutex
-	connected      bool
-	heartbeatStop  chan struct{}
-	directiveStop  chan struct{}
+	mu            sync.RWMutex
+	connected     bool
+	heartbeatStop chan struct{}
+	directiveStop chan struct{}
 
 	// OnDirective is called when a hub-initiated directive is received.
 	OnDirective func(directive *hubv1.WatchDirectivesResponse)
+
+	// CaptureSummaries, when set, supplies capture statuses included in
+	// each heartbeat.
+	CaptureSummaries func(ctx context.Context) []*hubv1.CaptureStatusSummary
+
+	// ReplaySummaries, when set, supplies replay shard statuses included
+	// in each heartbeat. This keeps the hub's load test view fresh even if
+	// individual ReportReplayStatus calls were lost.
+	ReplaySummaries func(ctx context.Context) []*hubv1.ReplayStatusSummary
 }
 
 // HubClientConfig holds configuration for the HubClient.
@@ -40,8 +50,10 @@ type HubClientConfig struct {
 	HubAddress string
 	SpokeName  string
 	ClusterID  string
-	TLSConfig  *tls.Config
-	Logger     logr.Logger
+	// Cell is the deployment cell this spoke registers under. Optional.
+	Cell      string
+	TLSConfig *tls.Config
+	Logger    logr.Logger
 }
 
 // NewHubClient creates a new HubClient.
@@ -51,6 +63,7 @@ func NewHubClient(cfg HubClientConfig) *HubClient {
 		hubAddress: cfg.HubAddress,
 		spokeName:  cfg.SpokeName,
 		clusterID:  cfg.ClusterID,
+		cell:       cfg.Cell,
 		tlsConfig:  cfg.TLSConfig,
 	}
 }
@@ -91,6 +104,7 @@ func (c *HubClient) Register(ctx context.Context) (int32, error) {
 	resp, err := client.RegisterSpoke(ctx, &hubv1.RegisterSpokeRequest{
 		SpokeId:     c.spokeName,
 		ClusterName: c.clusterID,
+		Cell:        c.cell,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("registering spoke: %w", err)
@@ -106,6 +120,7 @@ func (c *HubClient) Register(ctx context.Context) (int32, error) {
 
 	c.log.Info("registered with hub",
 		"spokeID", c.spokeName,
+		"cell", c.cell,
 		"heartbeatInterval", resp.HeartbeatIntervalSeconds,
 	)
 
@@ -150,13 +165,21 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 		return
 	}
 
+	req := &hubv1.HeartbeatRequest{
+		SpokeId: spokeID,
+	}
+	if c.CaptureSummaries != nil {
+		req.CaptureSummaries = c.CaptureSummaries(ctx)
+		req.ActiveCaptures = int32(len(req.CaptureSummaries))
+	}
+	if c.ReplaySummaries != nil {
+		req.ReplaySummaries = c.ReplaySummaries(ctx)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	_, err := client.Heartbeat(ctx, &hubv1.HeartbeatRequest{
-		SpokeId: spokeID,
-	})
-	if err != nil {
+	if _, err := client.Heartbeat(ctx, req); err != nil {
 		c.log.Error(err, "heartbeat failed")
 		return
 	}
@@ -181,6 +204,29 @@ func (c *HubClient) ReportStatus(ctx context.Context, statuses []*hubv1.CaptureS
 	})
 	if err != nil {
 		return fmt.Errorf("reporting status: %w", err)
+	}
+	return nil
+}
+
+// ReportReplayStatus reports replay shard statuses to the hub.
+func (c *HubClient) ReportReplayStatus(ctx context.Context, statuses []*hubv1.ReplayStatusSummary) error {
+	c.mu.RLock()
+	client := c.client
+	spokeID := c.spokeID
+	c.mu.RUnlock()
+	if client == nil {
+		return fmt.Errorf("not connected to hub")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	_, err := client.ReportReplayStatus(ctx, &hubv1.ReportReplayStatusRequest{
+		SpokeId:  spokeID,
+		Statuses: statuses,
+	})
+	if err != nil {
+		return fmt.Errorf("reporting replay status: %w", err)
 	}
 	return nil
 }
@@ -297,4 +343,3 @@ func (c *HubClient) IsConnected() bool {
 	defer c.mu.RUnlock()
 	return c.connected
 }
-

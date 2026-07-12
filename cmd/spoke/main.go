@@ -35,6 +35,7 @@ func main() {
 		hubAddress      string
 		spokeName       string
 		clusterID       string
+		cell            string
 		leaderElect     bool
 	)
 
@@ -43,6 +44,7 @@ func main() {
 	flag.StringVar(&hubAddress, "hub-address", envOr("HUB_ADDRESS", ""), "The gRPC address of the hub (optional, spoke works standalone if empty).")
 	flag.StringVar(&spokeName, "spoke-name", envOr("SPOKE_NAME", ""), "The name of this spoke cluster (defaults to hostname).")
 	flag.StringVar(&clusterID, "cluster-id", envOr("CLUSTER_ID", ""), "The cluster identifier for this spoke.")
+	flag.StringVar(&cell, "cell", envOr("CELL_NAME", ""), "The deployment cell this spoke registers under (optional).")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -50,6 +52,9 @@ func main() {
 
 	if agentImage := envOr("AGENT_IMAGE", ""); agentImage != "" {
 		spoke.CaptureAgentImage = agentImage
+	}
+	if replayImage := envOr("REPLAY_ENGINE_IMAGE", ""); replayImage != "" {
+		spoke.ReplayEngineImage = replayImage
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -81,18 +86,51 @@ func main() {
 			HubAddress: hubAddress,
 			SpokeName:  spokeName,
 			ClusterID:  clusterID,
+			Cell:       cell,
 			Logger:     setupLog,
 		})
 
+		replayDirectives := &spoke.ReplayDirectiveHandler{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("replay-directives"),
+		}
+
 		hubClient.OnDirective = func(resp *hubv1.WatchDirectivesResponse) {
-			d := resp.GetDirective()
-			if d != nil {
-				setupLog.Info("received directive from hub",
+			if d := resp.GetDirective(); d != nil {
+				setupLog.Info("received capture directive from hub",
 					"action", d.Action,
 					"capture", d.CaptureName,
 					"namespace", d.CaptureNamespace,
 				)
 			}
+			if rd := resp.GetReplayDirective(); rd != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := replayDirectives.Handle(ctx, rd); err != nil {
+					setupLog.Error(err, "failed to apply replay directive",
+						"action", rd.Action,
+						"loadTest", rd.LoadTestName,
+						"namespace", rd.LoadTestNamespace,
+					)
+				}
+			}
+		}
+
+		// Include replay shard statuses in heartbeats so the hub's load
+		// test view survives lost status reports.
+		hubClient.ReplaySummaries = func(ctx context.Context) []*hubv1.ReplayStatusSummary {
+			var replays capturev1alpha1.TrafficReplayList
+			if err := mgr.GetClient().List(ctx, &replays); err != nil {
+				// The manager cache may not be started yet; skip this beat.
+				return nil
+			}
+			var summaries []*hubv1.ReplayStatusSummary
+			for i := range replays.Items {
+				if summary := spoke.ReplaySummaryFromStatus(&replays.Items[i]); summary != nil {
+					summaries = append(summaries, summary)
+				}
+			}
+			return summaries
 		}
 
 		ctx := context.Background()
@@ -133,6 +171,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CaptureStorage")
+		os.Exit(1)
+	}
+
+	if err := (&spoke.TrafficReplayReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		HubClient: hubClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TrafficReplay")
 		os.Exit(1)
 	}
 

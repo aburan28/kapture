@@ -1,0 +1,401 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: captureloadtests.capture.gateway.io
+spec:
+  group: capture.gateway.io
+  names:
+    kind: CaptureLoadTest
+    listKind: CaptureLoadTestList
+    plural: captureloadtests
+    singular: captureloadtest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.sourceRef.name
+      name: Source
+      type: string
+    - jsonPath: .spec.target.host
+      name: Target
+      type: string
+    - jsonPath: .status.totalShards
+      name: Shards
+      type: integer
+    - jsonPath: .status.sentRequests
+      name: Sent
+      type: integer
+    - jsonPath: .status.failedRequests
+      name: Failed
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          CaptureLoadTest defines a distributed load test that replays captured
+          traffic from many spoke clusters at once, coordinated by the hub.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              CaptureLoadTestSpec defines a distributed replay-based load test executed
+              across spoke clusters coordinated by the hub.
+            properties:
+              abort:
+                description: Abort defines in-flight safety limits.
+                properties:
+                  errorPercent:
+                    description: |-
+                      ErrorPercent aborts the run when failed requests exceed this
+                      percentage of sent requests (evaluated once at least
+                      minSampleRequests requests have been sent).
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  maxDuration:
+                    description: MaxDuration aborts the run if it has been running
+                      longer than this.
+                    type: string
+                  minSampleRequests:
+                    description: |-
+                      MinSampleRequests is the minimum number of attempted requests before
+                      ErrorPercent is evaluated. Defaults to 100.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                type: object
+              distribution:
+                description: Distribution controls cell targeting and shard fan-out.
+                properties:
+                  cells:
+                    description: |-
+                      Cells restricts the load test to spokes registered in these cells.
+                      Empty means all connected spokes are eligible.
+                    items:
+                      type: string
+                    type: array
+                  concurrencyPerWorker:
+                    default: 10
+                    description: |-
+                      ConcurrencyPerWorker is the number of parallel senders inside each
+                      replay worker.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxSpokes:
+                    description: |-
+                      MaxSpokes caps how many spokes participate. Zero or unset means all
+                      eligible spokes participate.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  workersPerSpoke:
+                    default: 1
+                    description: |-
+                      WorkersPerSpoke is the number of replay shards each participating
+                      spoke runs. Total shards = participating spokes * workersPerSpoke.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              filters:
+                description: |-
+                  Filters narrows which captured requests are replayed. Limit applies
+                  per shard.
+                properties:
+                  endTime:
+                    description: EndTime replays only requests captured before this
+                      time.
+                    format: date-time
+                    type: string
+                  limit:
+                    description: Limit caps the total number of requests to replay.
+                      Zero means unlimited.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  methods:
+                    description: Methods filters to specific HTTP methods.
+                    items:
+                      type: string
+                    type: array
+                  pathPrefix:
+                    description: PathPrefix filters to requests whose path starts
+                      with this prefix.
+                    type: string
+                  startTime:
+                    description: StartTime replays only requests captured at or after
+                      this time.
+                    format: date-time
+                    type: string
+                type: object
+              rate:
+                description: |-
+                  Rate controls replay pacing. For Constant mode the configured
+                  requestsPerSecond is the aggregate rate across all shards; the hub
+                  divides it between workers. Defaults to OriginalTiming behaviour of
+                  each shard's subset, which reproduces the recorded QPS in aggregate.
+                properties:
+                  mode:
+                    default: Unlimited
+                    description: Mode controls how replay requests are paced.
+                    enum:
+                    - Constant
+                    - OriginalTiming
+                    - Unlimited
+                    type: string
+                  requestsPerSecond:
+                    description: RequestsPerSecond is the target RPS when Mode is
+                      Constant.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  timeScale:
+                    description: |-
+                      TimeScale multiplies original inter-request delays when Mode is
+                      OriginalTiming. 1.0 = real-time, 0.5 = 2x speed.
+                    type: string
+                required:
+                - mode
+                type: object
+              sourceRef:
+                description: |-
+                  SourceRef references the TrafficCapture whose recorded traffic drives
+                  the load test. Every participating spoke must be able to resolve the
+                  referenced capture data through StorageRef.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              storageRef:
+                description: |-
+                  StorageRef names the CaptureStorage (present on each participating
+                  spoke, same name/namespace as this load test) to read captured data from.
+                properties:
+                  name:
+                    description: |-
+                      ObjectName refers to the name of a Kubernetes object.
+                      Object names can have a variety of forms, including RFC 1123 subdomains,
+                      RFC 1123 labels, or RFC 1035 labels.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              target:
+                description: Target defines where replayed traffic is sent.
+                properties:
+                  host:
+                    description: Host is the target hostname or IP to replay traffic
+                      to.
+                    type: string
+                  port:
+                    description: Port is the target port. Defaults to 80 for HTTP,
+                      443 for HTTPS.
+                    format: int32
+                    type: integer
+                  tls:
+                    default: false
+                    type: boolean
+                required:
+                - host
+                type: object
+            required:
+            - sourceRef
+            - storageRef
+            - target
+            type: object
+          status:
+            description: CaptureLoadTestStatus defines the observed state of CaptureLoadTest.
+            properties:
+              achievedRPS:
+                description: AchievedRPS is the aggregate observed send rate across
+                  all shards.
+                type: string
+              assignedSpokes:
+                description: AssignedSpokes is the number of spokes participating
+                  in the run.
+                format: int32
+                type: integer
+              assignments:
+                description: |-
+                  Assignments records the spoke → shard mapping decided at distribution
+                  time.
+                items:
+                  description: |-
+                    LoadTestAssignment records which spoke runs which shards. The coordinator
+                    uses it to route stop directives and to detect orphaned shards.
+                  properties:
+                    cell:
+                      type: string
+                    shardIndexes:
+                      description: ShardIndexes lists the shard indexes assigned to
+                        this spoke.
+                      items:
+                        format: int32
+                        type: integer
+                      type: array
+                    spokeID:
+                      type: string
+                  required:
+                  - shardIndexes
+                  - spokeID
+                  type: object
+                type: array
+              cells:
+                description: Cells aggregates progress per cell.
+                items:
+                  description: LoadTestCellStatus aggregates progress for one cell.
+                  properties:
+                    failedRequests:
+                      format: int64
+                      type: integer
+                    name:
+                      type: string
+                    sentRequests:
+                      format: int64
+                      type: integer
+                    shards:
+                      format: int32
+                      type: integer
+                    spokes:
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
+              completedShards:
+                description: CompletedShards is the number of shards that finished
+                  successfully.
+                format: int32
+                type: integer
+              completionTime:
+                format: date-time
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failedRequests:
+                format: int64
+                type: integer
+              failedShards:
+                description: FailedShards is the number of shards that terminated
+                  with an error.
+                format: int32
+                type: integer
+              filteredRequests:
+                format: int64
+                type: integer
+              phase:
+                enum:
+                - Pending
+                - Distributing
+                - Running
+                - Completed
+                - Failed
+                - Aborted
+                type: string
+              sentRequests:
+                format: int64
+                type: integer
+              startTime:
+                format: date-time
+                type: string
+              totalRequests:
+                format: int64
+                type: integer
+              totalShards:
+                description: TotalShards is the number of replay shards the capture
+                  was split into.
+                format: int32
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

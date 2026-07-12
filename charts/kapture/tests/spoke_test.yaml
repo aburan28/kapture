@@ -38,6 +38,12 @@ tests:
           path: spec.template.spec.containers[0].env[0].value
           value: "kapture/agent:dev"
       - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: REPLAY_ENGINE_IMAGE
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: "kapture/replay-engine:dev"
+      - equal:
           path: spec.template.spec.containers[0].resources.limits.cpu
           value: 500m
       - equal:
@@ -64,11 +70,24 @@ tests:
       spoke.hub.address: "hub-service.capture-system.svc:9443"
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].env[1].name
+          path: spec.template.spec.containers[0].env[2].name
           value: HUB_ADDRESS
       - equal:
-          path: spec.template.spec.containers[0].env[1].value
+          path: spec.template.spec.containers[0].env[2].value
           value: "hub-service.capture-system.svc:9443"
+
+  - it: should render spoke deployment with cell name
+    template: spoke-deployment.yaml
+    set:
+      spoke.hub.address: "hub-service.capture-system.svc:9443"
+      spoke.cell: "cell-us-east-1a"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[3].name
+          value: CELL_NAME
+      - equal:
+          path: spec.template.spec.containers[0].env[3].value
+          value: "cell-us-east-1a"
 
   - it: should render spoke deployment with nodeSelector and tolerations
     template: spoke-deployment.yaml
@@ -150,23 +169,35 @@ tests:
           value: trafficcaptures
         documentIndex: 0
       - equal:
-          path: rules[4].apiGroups[0]
+          path: rules[4].resources[0]
+          value: trafficreplays
+        documentIndex: 0
+      - equal:
+          path: rules[6].apiGroups[0]
+          value: batch
+        documentIndex: 0
+      - equal:
+          path: rules[6].resources[0]
+          value: jobs
+        documentIndex: 0
+      - equal:
+          path: rules[8].apiGroups[0]
           value: gateway.networking.k8s.io
         documentIndex: 0
       - equal:
-          path: rules[5].apiGroups[0]
+          path: rules[9].apiGroups[0]
           value: apps
         documentIndex: 0
       - equal:
-          path: rules[5].resources[0]
+          path: rules[9].resources[0]
           value: deployments
         documentIndex: 0
       - equal:
-          path: rules[7].apiGroups[0]
+          path: rules[11].apiGroups[0]
           value: autoscaling
         documentIndex: 0
       - equal:
-          path: rules[7].resources[0]
+          path: rules[11].resources[0]
           value: horizontalpodautoscalers
         documentIndex: 0
       - isKind:

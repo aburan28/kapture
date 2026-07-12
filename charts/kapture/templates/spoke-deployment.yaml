@@ -24,9 +24,15 @@ spec:
           env:
             - name: AGENT_IMAGE
               value: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+            - name: REPLAY_ENGINE_IMAGE
+              value: "{{ .Values.replayEngine.image.repository }}:{{ .Values.replayEngine.image.tag }}"
             {{- if .Values.spoke.hub.address }}
             - name: HUB_ADDRESS
               value: {{ .Values.spoke.hub.address | quote }}
+            {{- end }}
+            {{- if .Values.spoke.cell }}
+            - name: CELL_NAME
+              value: {{ .Values.spoke.cell | quote }}
             {{- end }}
             {{- if .Values.history.enabled }}
             {{- if .Values.history.localPostgres.enabled }}

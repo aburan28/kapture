@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,11 +34,12 @@ type spokeEntry struct {
 	info          *hubv1.SpokeInfo
 	lastHeartbeat time.Time
 	captures      map[string]*hubv1.CaptureStatusSummary // key: "namespace/name"
+	replays       map[string]*hubv1.ReplayStatusSummary  // key: "namespace/name/replayName"
 
 	// directives buffers hub-initiated directives until the spoke's
 	// WatchDirectives stream picks them up. The channel is never closed;
 	// done signals watchers that the entry has been retired.
-	directives chan *hubv1.CaptureDirective
+	directives chan *hubv1.WatchDirectivesResponse
 	done       chan struct{}
 }
 
@@ -122,10 +124,12 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 			LastHeartbeat:  timestamppb.New(now),
 			Capabilities:   req.Capabilities,
 			State:          hubv1.SpokeState_SPOKE_STATE_CONNECTED,
+			Cell:           req.Cell,
 		},
 		lastHeartbeat: now,
 		captures:      make(map[string]*hubv1.CaptureStatusSummary),
-		directives:    make(chan *hubv1.CaptureDirective, DirectiveBufferSize),
+		replays:       make(map[string]*hubv1.ReplayStatusSummary),
+		directives:    make(chan *hubv1.WatchDirectivesResponse, DirectiveBufferSize),
 		done:          make(chan struct{}),
 	}
 
@@ -161,6 +165,12 @@ func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hub
 		key := captureKey(cs.CaptureNamespace, cs.CaptureName)
 		entry.captures[key] = cs
 	}
+
+	// Update replay summaries from heartbeat.
+	for _, rs := range req.ReplaySummaries {
+		entry.replays[replayKey(rs)] = rs
+	}
+	entry.info.ActiveReplays = activeReplayCount(entry.replays)
 
 	return &hubv1.HeartbeatResponse{Acknowledged: true}, nil
 }
@@ -205,22 +215,36 @@ func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.
 			return stream.Context().Err()
 		case <-entry.done:
 			return status.Errorf(codes.Aborted, "spoke %q deregistered", req.SpokeId)
-		case directive := <-entry.directives:
-			if err := stream.Send(&hubv1.WatchDirectivesResponse{Directive: directive}); err != nil {
+		case resp := <-entry.directives:
+			if err := stream.Send(resp); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// SendDirective queues a directive for delivery to a single spoke. The
-// directive is buffered until the spoke's WatchDirectives stream consumes it.
+// SendDirective queues a capture directive for delivery to a single spoke.
+// The directive is buffered until the spoke's WatchDirectives stream
+// consumes it.
 func (s *Server) SendDirective(spokeID string, directive *hubv1.CaptureDirective) error {
-	if spokeID == "" {
-		return status.Error(codes.InvalidArgument, "spoke_id is required")
-	}
 	if directive == nil {
 		return status.Error(codes.InvalidArgument, "directive is required")
+	}
+	return s.queueDirective(spokeID, &hubv1.WatchDirectivesResponse{Directive: directive})
+}
+
+// SendReplayDirective queues a replay directive for delivery to a single
+// spoke. Used by the load test coordinator to start and stop replay shards.
+func (s *Server) SendReplayDirective(spokeID string, directive *hubv1.ReplayDirective) error {
+	if directive == nil {
+		return status.Error(codes.InvalidArgument, "directive is required")
+	}
+	return s.queueDirective(spokeID, &hubv1.WatchDirectivesResponse{ReplayDirective: directive})
+}
+
+func (s *Server) queueDirective(spokeID string, resp *hubv1.WatchDirectivesResponse) error {
+	if spokeID == "" {
+		return status.Error(codes.InvalidArgument, "spoke_id is required")
 	}
 
 	s.mu.RLock()
@@ -231,7 +255,7 @@ func (s *Server) SendDirective(spokeID string, directive *hubv1.CaptureDirective
 	}
 
 	select {
-	case entry.directives <- directive:
+	case entry.directives <- resp:
 		return nil
 	default:
 		return status.Errorf(codes.ResourceExhausted, "directive buffer full for spoke %q", spokeID)
@@ -256,7 +280,7 @@ func (s *Server) BroadcastDirective(directive *hubv1.CaptureDirective) int {
 	queued := 0
 	for _, entry := range entries {
 		select {
-		case entry.directives <- directive:
+		case entry.directives <- &hubv1.WatchDirectivesResponse{Directive: directive}:
 			queued++
 		default:
 		}
@@ -292,6 +316,31 @@ func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCapture
 	return &hubv1.ReportCaptureStatusResponse{Acknowledged: true}, nil
 }
 
+// ReportReplayStatus receives replay shard status updates from a spoke.
+func (s *Server) ReportReplayStatus(_ context.Context, req *hubv1.ReportReplayStatusRequest) (*hubv1.ReportReplayStatusResponse, error) {
+	if req.GetSpokeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if len(req.GetStatuses()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one status is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, ok := s.spokes[req.SpokeId]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "spoke %q not registered", req.SpokeId)
+	}
+
+	for _, rs := range req.Statuses {
+		entry.replays[replayKey(rs)] = rs
+	}
+	entry.info.ActiveReplays = activeReplayCount(entry.replays)
+
+	return &hubv1.ReportReplayStatusResponse{Acknowledged: true}, nil
+}
+
 // --- Query RPCs ---
 
 // ListCaptures returns all captures across spokes, optionally filtered by spoke_id.
@@ -302,6 +351,9 @@ func (s *Server) ListCaptures(_ context.Context, req *hubv1.ListCapturesRequest)
 	var captures []*hubv1.CaptureInfo
 	for spokeID, entry := range s.spokes {
 		if req.GetSpokeId() != "" && spokeID != req.SpokeId {
+			continue
+		}
+		if req.GetCell() != "" && entry.info.Cell != req.Cell {
 			continue
 		}
 		for _, cs := range entry.captures {
@@ -353,14 +405,18 @@ func (s *Server) GetCaptureStatus(_ context.Context, req *hubv1.GetCaptureStatus
 	return nil, status.Errorf(codes.NotFound, "capture %q not found", key)
 }
 
-// ListSpokes returns information about all registered spokes.
-func (s *Server) ListSpokes(_ context.Context, _ *hubv1.ListSpokesRequest) (*hubv1.ListSpokesResponse, error) {
+// ListSpokes returns information about all registered spokes, optionally
+// filtered by cell.
+func (s *Server) ListSpokes(_ context.Context, req *hubv1.ListSpokesRequest) (*hubv1.ListSpokesResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	spokes := make([]*hubv1.SpokeInfo, 0, len(s.spokes))
 	now := time.Now()
 	for _, entry := range s.spokes {
+		if req.GetCell() != "" && entry.info.Cell != req.Cell {
+			continue
+		}
 		info := cloneSpokeInfo(entry.info)
 		// Mark disconnected if heartbeat is stale.
 		if now.Sub(entry.lastHeartbeat) > SpokeTimeout {
@@ -370,6 +426,70 @@ func (s *Server) ListSpokes(_ context.Context, _ *hubv1.ListSpokesRequest) (*hub
 	}
 
 	return &hubv1.ListSpokesResponse{Spokes: spokes}, nil
+}
+
+// ListCells aggregates registered spokes by cell. Spokes registered without
+// a cell are grouped under the empty cell name.
+func (s *Server) ListCells(_ context.Context, _ *hubv1.ListCellsRequest) (*hubv1.ListCellsResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	byCell := make(map[string]*hubv1.CellInfo)
+	now := time.Now()
+	for _, entry := range s.spokes {
+		cell := byCell[entry.info.Cell]
+		if cell == nil {
+			cell = &hubv1.CellInfo{Name: entry.info.Cell}
+			byCell[entry.info.Cell] = cell
+		}
+		cell.TotalSpokes++
+		if now.Sub(entry.lastHeartbeat) <= SpokeTimeout {
+			cell.ConnectedSpokes++
+		}
+		cell.ActiveCaptures += int32(len(entry.captures))
+		cell.ActiveReplays += activeReplayCount(entry.replays)
+	}
+
+	names := make([]string, 0, len(byCell))
+	for name := range byCell {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	cells := make([]*hubv1.CellInfo, 0, len(names))
+	for _, name := range names {
+		cells = append(cells, byCell[name])
+	}
+	return &hubv1.ListCellsResponse{Cells: cells}, nil
+}
+
+// ListReplays returns replay shard statuses across spokes, optionally
+// filtered by load test identity and cell.
+func (s *Server) ListReplays(_ context.Context, req *hubv1.ListReplaysRequest) (*hubv1.ListReplaysResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var replays []*hubv1.ReplayInfo
+	for spokeID, entry := range s.spokes {
+		if req.GetCell() != "" && entry.info.Cell != req.Cell {
+			continue
+		}
+		for _, rs := range entry.replays {
+			if req.GetLoadTestName() != "" && rs.LoadTestName != req.LoadTestName {
+				continue
+			}
+			if req.GetLoadTestNamespace() != "" && rs.LoadTestNamespace != req.LoadTestNamespace {
+				continue
+			}
+			replays = append(replays, &hubv1.ReplayInfo{
+				SpokeId: spokeID,
+				Cell:    entry.info.Cell,
+				Summary: rs,
+			})
+		}
+	}
+
+	return &hubv1.ListReplaysResponse{Replays: replays}, nil
 }
 
 // --- Status aggregation helpers ---
@@ -401,6 +521,19 @@ func (s *Server) ActiveCaptureCount() int32 {
 	return count
 }
 
+// ActiveReplayCount returns the total number of non-terminal replay shards
+// across all spokes.
+func (s *Server) ActiveReplayCount() int32 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var count int32
+	for _, entry := range s.spokes {
+		count += activeReplayCount(entry.replays)
+	}
+	return count
+}
+
 // SpokeStatuses returns a snapshot of spoke statuses for the CaptureHub CR status.
 func (s *Server) SpokeStatuses() []SpokeStatusSnapshot {
 	s.mu.RLock()
@@ -410,8 +543,10 @@ func (s *Server) SpokeStatuses() []SpokeStatusSnapshot {
 	for _, entry := range s.spokes {
 		result = append(result, SpokeStatusSnapshot{
 			Name:           entry.info.ClusterName,
+			Cell:           entry.info.Cell,
 			LastHeartbeat:  entry.lastHeartbeat,
 			ActiveCaptures: entry.info.ActiveCaptures,
+			ActiveReplays:  activeReplayCount(entry.replays),
 		})
 	}
 	return result
@@ -421,14 +556,159 @@ func (s *Server) SpokeStatuses() []SpokeStatusSnapshot {
 // CaptureHub CR status without importing proto types.
 type SpokeStatusSnapshot struct {
 	Name           string
+	Cell           string
 	LastHeartbeat  time.Time
 	ActiveCaptures int32
+	ActiveReplays  int32
+}
+
+// CellStatusSnapshot aggregates spoke state per cell for the CaptureHub CR
+// status.
+type CellStatusSnapshot struct {
+	Name            string
+	ConnectedSpokes int32
+	TotalSpokes     int32
+	ActiveCaptures  int32
+	ActiveReplays   int32
+}
+
+// CellStatuses returns per-cell aggregates, sorted by cell name.
+func (s *Server) CellStatuses() []CellStatusSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	byCell := make(map[string]*CellStatusSnapshot)
+	now := time.Now()
+	for _, entry := range s.spokes {
+		cell := byCell[entry.info.Cell]
+		if cell == nil {
+			cell = &CellStatusSnapshot{Name: entry.info.Cell}
+			byCell[entry.info.Cell] = cell
+		}
+		cell.TotalSpokes++
+		if now.Sub(entry.lastHeartbeat) <= SpokeTimeout {
+			cell.ConnectedSpokes++
+		}
+		cell.ActiveCaptures += int32(len(entry.captures))
+		cell.ActiveReplays += activeReplayCount(entry.replays)
+	}
+
+	names := make([]string, 0, len(byCell))
+	for name := range byCell {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	result := make([]CellStatusSnapshot, 0, len(names))
+	for _, name := range names {
+		result = append(result, *byCell[name])
+	}
+	return result
+}
+
+// SpokeSelection identifies a spoke chosen to run replay shards.
+type SpokeSelection struct {
+	SpokeID string
+	Cell    string
+}
+
+// SelectSpokes returns connected spokes eligible for a load test. If cells
+// is non-empty only spokes registered in one of those cells are eligible.
+// If max > 0 at most max spokes are returned. The result is sorted by spoke
+// ID so repeated planning is deterministic.
+func (s *Server) SelectSpokes(cells []string, max int) []SpokeSelection {
+	cellSet := make(map[string]bool, len(cells))
+	for _, c := range cells {
+		cellSet[c] = true
+	}
+
+	s.mu.RLock()
+	now := time.Now()
+	selected := make([]SpokeSelection, 0, len(s.spokes))
+	for spokeID, entry := range s.spokes {
+		if now.Sub(entry.lastHeartbeat) > SpokeTimeout {
+			continue
+		}
+		if len(cellSet) > 0 && !cellSet[entry.info.Cell] {
+			continue
+		}
+		selected = append(selected, SpokeSelection{SpokeID: spokeID, Cell: entry.info.Cell})
+	}
+	s.mu.RUnlock()
+
+	sort.Slice(selected, func(i, j int) bool { return selected[i].SpokeID < selected[j].SpokeID })
+	if max > 0 && len(selected) > max {
+		selected = selected[:max]
+	}
+	return selected
+}
+
+// ReplayStatusSnapshot pairs a replay shard summary with its placement.
+type ReplayStatusSnapshot struct {
+	SpokeID string
+	Cell    string
+	Summary *hubv1.ReplayStatusSummary
+}
+
+// ReplayStatuses returns all shard statuses reported for one load test.
+func (s *Server) ReplayStatuses(namespace, name string) []ReplayStatusSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []ReplayStatusSnapshot
+	for spokeID, entry := range s.spokes {
+		for _, rs := range entry.replays {
+			if rs.LoadTestNamespace != namespace || rs.LoadTestName != name {
+				continue
+			}
+			result = append(result, ReplayStatusSnapshot{
+				SpokeID: spokeID,
+				Cell:    entry.info.Cell,
+				Summary: rs,
+			})
+		}
+	}
+	return result
+}
+
+// ClearReplayStatuses drops all shard statuses for one load test from the
+// registry. Called by the coordinator when a load test is deleted so stale
+// terminal statuses do not accumulate.
+func (s *Server) ClearReplayStatuses(namespace, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, entry := range s.spokes {
+		for key, rs := range entry.replays {
+			if rs.LoadTestNamespace == namespace && rs.LoadTestName == name {
+				delete(entry.replays, key)
+			}
+		}
+		entry.info.ActiveReplays = activeReplayCount(entry.replays)
+	}
 }
 
 // --- Helpers ---
 
 func captureKey(namespace, name string) string {
 	return namespace + "/" + name
+}
+
+func replayKey(rs *hubv1.ReplayStatusSummary) string {
+	return rs.LoadTestNamespace + "/" + rs.LoadTestName + "/" + rs.ReplayName
+}
+
+// activeReplayCount counts non-terminal replay shards.
+func activeReplayCount(replays map[string]*hubv1.ReplayStatusSummary) int32 {
+	var count int32
+	for _, rs := range replays {
+		switch rs.Phase {
+		case hubv1.ReplayPhase_REPLAY_PHASE_COMPLETED, hubv1.ReplayPhase_REPLAY_PHASE_FAILED:
+		default:
+			count++
+		}
+	}
+	return count
 }
 
 func captureInfoFromSummary(cs *hubv1.CaptureStatusSummary, spokeID string) *hubv1.CaptureInfo {
@@ -450,5 +730,7 @@ func cloneSpokeInfo(info *hubv1.SpokeInfo) *hubv1.SpokeInfo {
 		LastHeartbeat:  info.LastHeartbeat,
 		Capabilities:   info.Capabilities,
 		State:          info.State,
+		Cell:           info.Cell,
+		ActiveReplays:  info.ActiveReplays,
 	}
 }

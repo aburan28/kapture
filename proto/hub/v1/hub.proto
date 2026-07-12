@@ -18,11 +18,14 @@ service HubService {
 
   // Status reporting (spoke → hub)
   rpc ReportCaptureStatus(ReportCaptureStatusRequest) returns (ReportCaptureStatusResponse);
+  rpc ReportReplayStatus(ReportReplayStatusRequest) returns (ReportReplayStatusResponse);
 
   // Query API (for dashboards / CLI tooling)
   rpc ListCaptures(ListCapturesRequest) returns (ListCapturesResponse);
   rpc GetCaptureStatus(GetCaptureStatusRequest) returns (GetCaptureStatusResponse);
   rpc ListSpokes(ListSpokesRequest) returns (ListSpokesResponse);
+  rpc ListCells(ListCellsRequest) returns (ListCellsResponse);
+  rpc ListReplays(ListReplaysRequest) returns (ListReplaysResponse);
 }
 
 // ─── Spoke lifecycle ────────────────────────────────────────────────────────
@@ -33,6 +36,10 @@ message RegisterSpokeRequest {
   string kubernetes_version = 3;
   // Capabilities advertised by the spoke (e.g. supported storage backends).
   repeated string capabilities = 4;
+  // Cell is the deployment cell (availability grouping) this spoke belongs
+  // to. Cells let the hub target captures and load tests at a subset of the
+  // fleet. Empty means the spoke is not assigned to a cell.
+  string cell = 5;
 }
 
 message RegisterSpokeResponse {
@@ -46,6 +53,7 @@ message HeartbeatRequest {
   string spoke_id = 1;
   int32 active_captures = 2;
   repeated CaptureStatusSummary capture_summaries = 3;
+  repeated ReplayStatusSummary replay_summaries = 4;
 }
 
 message HeartbeatResponse {
@@ -75,9 +83,11 @@ enum DirectiveAction {
   DIRECTIVE_ACTION_UPDATE = 3;
 }
 
-// WatchDirectivesResponse wraps a CaptureDirective for the streaming RPC.
+// WatchDirectivesResponse wraps a directive for the streaming RPC. Exactly
+// one of the fields is set per message.
 message WatchDirectivesResponse {
   CaptureDirective directive = 1;
+  ReplayDirective replay_directive = 2;
 }
 
 message CaptureDirective {
@@ -124,6 +134,105 @@ message AgentScaling {
   int32 target_cpu = 4;
 }
 
+// ─── Replay / load-test orchestration ───────────────────────────────────────
+
+enum ReplayAction {
+  REPLAY_ACTION_UNSPECIFIED = 0;
+  REPLAY_ACTION_START = 1;
+  REPLAY_ACTION_STOP = 2;
+}
+
+// ReplayDirective is a hub-initiated instruction that tells a spoke to start
+// or stop a replay shard belonging to a distributed load test.
+message ReplayDirective {
+  string directive_id = 1;
+  ReplayAction action = 2;
+  // Identity of the CaptureLoadTest this shard belongs to.
+  string load_test_name = 3;
+  string load_test_namespace = 4;
+  // Serialised replay spec for START directives.
+  ReplaySpec spec = 5;
+}
+
+message ReplaySpec {
+  // Name of the source TrafficCapture whose data is replayed.
+  string source_capture = 1;
+  // Name of the CaptureStorage to read captured data from.
+  string storage_ref_name = 2;
+  string target_host = 3;
+  int32 target_port = 4;
+  bool target_tls = 5;
+  ReplayRate rate = 6;
+  ReplayShard shard = 7;
+  // Number of parallel senders within the replay worker.
+  int32 concurrency = 8;
+  ReplayDataFilters filters = 9;
+}
+
+message ReplayRate {
+  // Mode is one of "Constant", "OriginalTiming", "Unlimited".
+  string mode = 1;
+  // Per-shard requests per second when mode is Constant.
+  int32 requests_per_second = 2;
+  // Multiplier for inter-request delays when mode is OriginalTiming
+  // (decimal string, e.g. "1.0", "0.5").
+  string time_scale = 3;
+}
+
+// ReplayShard identifies one deterministic slice of a capture. A worker with
+// shard {index: i, count: n} replays only requests whose hashed request ID
+// modulo n equals i, so n workers cover the capture exactly once.
+message ReplayShard {
+  int32 index = 1;
+  int32 count = 2;
+}
+
+message ReplayDataFilters {
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+  string path_prefix = 3;
+  repeated string methods = 4;
+  // Per-shard cap on replayed requests. Zero means unlimited.
+  int64 limit = 5;
+}
+
+enum ReplayPhase {
+  REPLAY_PHASE_UNSPECIFIED = 0;
+  REPLAY_PHASE_PENDING = 1;
+  REPLAY_PHASE_RUNNING = 2;
+  REPLAY_PHASE_COMPLETED = 3;
+  REPLAY_PHASE_FAILED = 4;
+}
+
+// ReplayStatusSummary reports the progress of one replay shard on a spoke.
+message ReplayStatusSummary {
+  string load_test_name = 1;
+  string load_test_namespace = 2;
+  // Name of the TrafficReplay resource backing this shard on the spoke.
+  string replay_name = 3;
+  int32 shard_index = 4;
+  int32 shard_count = 5;
+  ReplayPhase phase = 6;
+  int64 total_requests = 7;
+  int64 sent_requests = 8;
+  int64 failed_requests = 9;
+  int64 filtered_requests = 10;
+  double achieved_rps = 11;
+  int64 p50_latency_ms = 12;
+  int64 p95_latency_ms = 13;
+  int64 p99_latency_ms = 14;
+  string message = 15;
+}
+
+message ReportReplayStatusRequest {
+  string spoke_id = 1;
+  repeated ReplayStatusSummary statuses = 2;
+}
+
+message ReportReplayStatusResponse {
+  bool acknowledged = 1;
+}
+
 // ─── Status reporting ───────────────────────────────────────────────────────
 
 message CaptureStatusSummary {
@@ -160,6 +269,8 @@ message ListCapturesRequest {
   string spoke_id = 1;
   // Optional: filter by namespace.
   string namespace = 2;
+  // Optional: filter by cell.
+  string cell = 3;
 }
 
 message CaptureInfo {
@@ -187,7 +298,10 @@ message GetCaptureStatusResponse {
   CaptureInfo capture = 1;
 }
 
-message ListSpokesRequest {}
+message ListSpokesRequest {
+  // Optional: filter by cell.
+  string cell = 1;
+}
 
 message SpokeInfo {
   string spoke_id = 1;
@@ -196,6 +310,8 @@ message SpokeInfo {
   google.protobuf.Timestamp last_heartbeat = 4;
   repeated string capabilities = 5;
   SpokeState state = 6;
+  string cell = 7;
+  int32 active_replays = 8;
 }
 
 enum SpokeState {
@@ -206,4 +322,38 @@ enum SpokeState {
 
 message ListSpokesResponse {
   repeated SpokeInfo spokes = 1;
+}
+
+message ListCellsRequest {}
+
+// CellInfo aggregates the spokes registered under one cell.
+message CellInfo {
+  string name = 1;
+  int32 connected_spokes = 2;
+  int32 total_spokes = 3;
+  int32 active_captures = 4;
+  int32 active_replays = 5;
+}
+
+message ListCellsResponse {
+  repeated CellInfo cells = 1;
+}
+
+message ListReplaysRequest {
+  // Optional: filter by load test identity.
+  string load_test_name = 1;
+  string load_test_namespace = 2;
+  // Optional: filter by cell.
+  string cell = 3;
+}
+
+// ReplayInfo is a replay shard status annotated with its placement.
+message ReplayInfo {
+  string spoke_id = 1;
+  string cell = 2;
+  ReplayStatusSummary summary = 3;
+}
+
+message ListReplaysResponse {
+  repeated ReplayInfo replays = 1;
 }

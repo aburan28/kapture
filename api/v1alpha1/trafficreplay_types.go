@@ -86,6 +86,26 @@ type ReplayFilters struct {
 	Limit *int64 `json:"limit,omitempty"`
 }
 
+// ReplayShardSpec assigns this replay one deterministic slice of the source
+// capture. A worker with shard {index: i, count: n} replays only requests
+// whose hashed request ID modulo n equals i, so n workers with the same
+// count cover the capture exactly once. Used by distributed load tests to
+// fan a single capture out across many spokes.
+type ReplayShardSpec struct {
+	// Index of this shard, in [0, count).
+	// +kubebuilder:validation:Minimum=0
+	Index int32 `json:"index"`
+
+	// Count is the total number of shards the capture is split into.
+	// +kubebuilder:validation:Minimum=1
+	Count int32 `json:"count"`
+}
+
+// LoadTestReference identifies the CaptureLoadTest a replay shard belongs to.
+type LoadTestReference struct {
+	Name string `json:"name"`
+}
+
 // ReplayTransformRef references a named transformer plugin.
 type ReplayTransformRef struct {
 	// Name is the registered transformer plugin name (e.g., "header-rewriter").
@@ -124,6 +144,17 @@ type TrafficReplaySpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1
 	Concurrency *int32 `json:"concurrency,omitempty"`
+
+	// Shard restricts this replay to a deterministic slice of the capture.
+	// Unset means the whole capture is replayed by this resource.
+	// +optional
+	Shard *ReplayShardSpec `json:"shard,omitempty"`
+
+	// LoadTestRef links this replay to the CaptureLoadTest that spawned it.
+	// Set by the spoke controller when the replay was created from a hub
+	// directive; user-created replays leave it unset.
+	// +optional
+	LoadTestRef *LoadTestReference `json:"loadTestRef,omitempty"`
 }
 
 // TrafficReplayStatus defines the observed state of TrafficReplay.
@@ -156,6 +187,22 @@ type TrafficReplayStatus struct {
 	// MeanLatency is the average round-trip time for replayed requests.
 	// +optional
 	MeanLatency *string `json:"meanLatency,omitempty"`
+
+	// P50Latency is the median round-trip time for replayed requests.
+	// +optional
+	P50Latency *string `json:"p50Latency,omitempty"`
+
+	// P95Latency is the 95th percentile round-trip time.
+	// +optional
+	P95Latency *string `json:"p95Latency,omitempty"`
+
+	// P99Latency is the 99th percentile round-trip time.
+	// +optional
+	P99Latency *string `json:"p99Latency,omitempty"`
+
+	// AchievedRPS is the observed send rate over the run.
+	// +optional
+	AchievedRPS *string `json:"achievedRPS,omitempty"`
 
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

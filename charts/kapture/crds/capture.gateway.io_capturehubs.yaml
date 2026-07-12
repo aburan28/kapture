@@ -127,6 +127,34 @@ spec:
               activeCaptures:
                 format: int32
                 type: integer
+              activeReplays:
+                format: int32
+                type: integer
+              cells:
+                description: Cells aggregates connected spokes by their registered
+                  cell.
+                items:
+                  description: CaptureHubCellStatus aggregates the spokes registered
+                    under one cell.
+                  properties:
+                    activeCaptures:
+                      format: int32
+                      type: integer
+                    activeReplays:
+                      format: int32
+                      type: integer
+                    connectedSpokes:
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    totalSpokes:
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
               connectedSpokes:
                 format: int32
                 type: integer
@@ -138,6 +166,13 @@ spec:
                     activeCaptures:
                       format: int32
                       type: integer
+                    activeReplays:
+                      format: int32
+                      type: integer
+                    cell:
+                      description: Cell is the deployment cell the spoke registered
+                        under.
+                      type: string
                     lastHeartbeat:
                       format: date-time
                       type: string

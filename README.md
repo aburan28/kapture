@@ -189,7 +189,66 @@ spec:
     type: mTLS
 ```
 
-**Status fields:** `connectedSpokes`, `activeCaptures`, `spokes[]` (name, lastHeartbeat, activeCaptures)
+**Status fields:** `connectedSpokes`, `activeCaptures`, `activeReplays`, `spokes[]` (name, cell, lastHeartbeat, activeCaptures, activeReplays), `cells[]` (per-cell aggregates)
+
+### TrafficReplay (namespaced)
+
+Replays captured data against a target service. Runs as a `replay-engine`
+Job on the spoke cluster. Usually created automatically as one shard of a
+`CaptureLoadTest`, but can also be created directly for standalone replays.
+
+```yaml
+apiVersion: capture.gateway.io/v1alpha1
+kind: TrafficReplay
+metadata:
+  name: orders-replay
+  namespace: prod
+spec:
+  sourceRef:
+    name: orders
+  storageRef:
+    name: s3-captures
+  target:
+    host: staging-api.internal
+    port: 8443
+    tls: true
+  rate:
+    mode: OriginalTiming    # Constant | OriginalTiming | Unlimited
+  concurrency: 50
+```
+
+### CaptureLoadTest (namespaced, hub cluster)
+
+Distributed load test that replays one capture from many spoke clusters at
+once. The hub selects connected spokes (optionally restricted to cells),
+splits the capture into deterministic hash shards, sends replay directives
+over the spoke gRPC streams, and aggregates shard progress into the status.
+See [docs/multi-cell-load-testing.md](docs/multi-cell-load-testing.md).
+
+```yaml
+apiVersion: capture.gateway.io/v1alpha1
+kind: CaptureLoadTest
+metadata:
+  name: orders-peak-replay
+  namespace: prod
+spec:
+  sourceRef:
+    name: orders
+  storageRef:
+    name: s3-captures
+  target:
+    host: staging-api.internal
+  rate:
+    mode: Constant
+    requestsPerSecond: 50000     # aggregate across all shards
+  distribution:
+    cells: ["cell-us-east-1a", "cell-us-east-1b"]
+    workersPerSpoke: 4
+    concurrencyPerWorker: 50
+  abort:
+    maxDuration: 30m
+    errorPercent: 5
+```
 
 ## Captured Data Format
 

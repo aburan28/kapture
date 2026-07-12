@@ -66,6 +66,8 @@ type config struct {
 	ratePerSecond float64
 	timeScale     float64
 	concurrency   int
+	shardIndex    int
+	shardCount    int
 
 	// Checkpoint
 	checkpointDir string
@@ -73,8 +75,9 @@ type config struct {
 	resume        bool
 
 	// Output
-	logLevel  string
-	logFormat string
+	logLevel    string
+	logFormat   string
+	summaryPath string
 }
 
 func main() {
@@ -122,6 +125,8 @@ func parseFlags() config {
 	flag.Float64Var(&cfg.ratePerSecond, "rate-per-second", 0, "Target RPS (constant mode)")
 	flag.Float64Var(&cfg.timeScale, "time-scale", 1.0, "Time scaling (original mode, 1.0=realtime)")
 	flag.IntVar(&cfg.concurrency, "concurrency", 10, "Number of parallel senders")
+	flag.IntVar(&cfg.shardIndex, "shard-index", 0, "Shard index for distributed replay (with --shard-count)")
+	flag.IntVar(&cfg.shardCount, "shard-count", 1, "Total shards for distributed replay (1=no sharding)")
 
 	// Checkpoint flags.
 	flag.StringVar(&cfg.checkpointDir, "checkpoint-dir", "/tmp/kapture-checkpoints", "Checkpoint directory")
@@ -131,6 +136,7 @@ func parseFlags() config {
 	// Output flags.
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.logFormat, "log-format", "text", "Log format: text, json")
+	flag.StringVar(&cfg.summaryPath, "summary-path", "", "Write a JSON run report to this file on completion (e.g. /dev/termination-log)")
 
 	flag.Parse()
 	return cfg
@@ -267,6 +273,8 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 		RatePerSecond: cfg.ratePerSecond,
 		TimeScale:     cfg.timeScale,
 		Concurrency:   cfg.concurrency,
+		ShardIndex:    cfg.shardIndex,
+		ShardCount:    cfg.shardCount,
 		Logger:        logger,
 	})
 	if err != nil {
@@ -304,6 +312,7 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 	}
 
 	printSummary(summary, logger)
+	writeRunReport(cfg.summaryPath, summary, logger)
 
 	// Clean up checkpoint on successful completion.
 	if summary.ErrorCount == 0 {
@@ -424,6 +433,20 @@ func printSummary(s *replay.Summary, logger *slog.Logger) {
 	if len(s.ErrorsByType) > 0 {
 		logger.Info("error distribution", "errors", s.ErrorsByType)
 	}
+}
+
+// writeRunReport persists the machine-readable run report so the spoke
+// controller can scrape final counts (typically via /dev/termination-log).
+func writeRunReport(path string, summary *replay.Summary, logger *slog.Logger) {
+	if path == "" {
+		return
+	}
+	report := replay.NewRunReport(summary)
+	if err := report.WriteFile(path); err != nil {
+		logger.Warn("failed to write run report", "path", path, "error", err)
+		return
+	}
+	logger.Info("run report written", "path", path)
 }
 
 func setupLogger(level, format string) *slog.Logger {

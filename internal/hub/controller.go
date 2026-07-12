@@ -127,6 +127,7 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 
 	hub.Status.ConnectedSpokes = srv.ConnectedSpokeCount()
 	hub.Status.ActiveCaptures = srv.ActiveCaptureCount()
+	hub.Status.ActiveReplays = srv.ActiveReplayCount()
 
 	spokeSnapshots := srv.SpokeStatuses()
 	hub.Status.Spokes = make([]capturev1alpha1.CaptureHubSpokeStatus, len(spokeSnapshots))
@@ -134,8 +135,22 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 		t := metav1.NewTime(ss.LastHeartbeat)
 		hub.Status.Spokes[i] = capturev1alpha1.CaptureHubSpokeStatus{
 			Name:           ss.Name,
+			Cell:           ss.Cell,
 			LastHeartbeat:  &t,
 			ActiveCaptures: ss.ActiveCaptures,
+			ActiveReplays:  ss.ActiveReplays,
+		}
+	}
+
+	cellSnapshots := srv.CellStatuses()
+	hub.Status.Cells = make([]capturev1alpha1.CaptureHubCellStatus, len(cellSnapshots))
+	for i, cs := range cellSnapshots {
+		hub.Status.Cells[i] = capturev1alpha1.CaptureHubCellStatus{
+			Name:            cs.Name,
+			ConnectedSpokes: cs.ConnectedSpokes,
+			TotalSpokes:     cs.TotalSpokes,
+			ActiveCaptures:  cs.ActiveCaptures,
+			ActiveReplays:   cs.ActiveReplays,
 		}
 	}
 
@@ -148,4 +163,3 @@ func (r *CaptureHubReconciler) GetServer() *Server {
 	defer r.mu.Unlock()
 	return r.server
 }
-
