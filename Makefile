@@ -33,3 +33,7 @@ docker-build:
 
 lint:
 	@echo "TODO: run golangci-lint once packages are implemented"
+
+.PHONY: verify-tla
+verify-tla:
+	./hack/verify-tla.sh

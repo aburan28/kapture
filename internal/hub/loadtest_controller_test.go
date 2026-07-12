@@ -301,7 +301,9 @@ func TestStopAllShards_SendsToEveryAssignedSpoke(t *testing.T) {
 		{SpokeID: "spoke-b", ShardIndexes: []int32{1}},
 	}
 
-	r.stopAllShards(s, lt, logr.Discard())
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards reported undelivered directives with healthy spokes")
+	}
 
 	for spoke, stream := range streams {
 		select {
@@ -313,5 +315,65 @@ func TestStopAllShards_SendsToEveryAssignedSpoke(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Errorf("spoke %s never received stop directive", spoke)
 		}
+	}
+}
+
+// TestStopAllShards_ReportsUndeliveredOnFullBuffer verifies the coordinator
+// learns when a STOP could not be queued so it retries instead of orphaning
+// running shards. This is the code-side half of the CleanupAfterDelete
+// property in verification/tla/KaptureLoadTest.tla.
+func TestStopAllShards_ReportsUndeliveredOnFullBuffer(t *testing.T) {
+	s := NewServer(":0")
+	registerSpokeInCell(t, s, "spoke-a", "cell-a")
+
+	// Fill the spoke's directive buffer so the STOP cannot be queued.
+	for i := 0; i < DirectiveBufferSize; i++ {
+		if err := s.SendReplayDirective("spoke-a", &hubv1.ReplayDirective{DirectiveId: "filler"}); err != nil {
+			t.Fatalf("filling buffer: %v", err)
+		}
+	}
+
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.Assignments = []capturev1alpha1.LoadTestAssignment{
+		{SpokeID: "spoke-a", ShardIndexes: []int32{0}},
+	}
+
+	if r.stopAllShards(s, lt, logr.Discard()) {
+		t.Fatal("stopAllShards claimed delivery with a full directive buffer")
+	}
+
+	// Drain the buffer (as the spoke's directive stream would) and retry:
+	// the STOP must now be accepted.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newFakeDirectiveStream(ctx)
+	go func() { _ = s.WatchDirectives(&hubv1.WatchDirectivesRequest{SpokeId: "spoke-a"}, stream) }()
+	for i := 0; i < DirectiveBufferSize; i++ {
+		select {
+		case <-stream.sent:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out draining directive buffer")
+		}
+	}
+
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards still undelivered after buffer drained")
+	}
+}
+
+// TestStopAllShards_DeregisteredSpokeCountsAsDelivered verifies a vanished
+// spoke does not wedge deletion forever.
+func TestStopAllShards_DeregisteredSpokeCountsAsDelivered(t *testing.T) {
+	s := NewServer(":0")
+
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.Assignments = []capturev1alpha1.LoadTestAssignment{
+		{SpokeID: "gone-spoke", ShardIndexes: []int32{0}},
+	}
+
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards blocked on a deregistered spoke")
 	}
 }

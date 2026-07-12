@@ -1,0 +1,13 @@
+FROM golang:1.26 AS builder
+
+WORKDIR /src
+COPY . .
+RUN go mod tidy
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/kapture-replay-engine ./cmd/replay-engine
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /out/kapture-replay-engine /kapture-replay-engine
+ENTRYPOINT ["/kapture-replay-engine"]

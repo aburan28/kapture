@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +61,10 @@ func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	// Spoke registrations, heartbeats, and replay reports change the
+	// in-memory registry without touching the CR, so refresh the status
+	// periodically rather than only on CR edits.
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // ensureServer starts or reconfigures the gRPC server.

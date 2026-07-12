@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,10 +72,17 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	srv := r.server()
 
 	// Deletion: stop all shards on the spokes, then release the finalizer.
+	// The finalizer is held until every connected spoke has accepted the
+	// STOP directive, so a full directive buffer cannot orphan running
+	// shards (verified by the CleanupAfterDelete property in
+	// verification/tla/KaptureLoadTest.tla).
 	if !lt.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&lt, LoadTestFinalizer) {
 			if srv != nil {
-				r.stopAllShards(srv, &lt, log)
+				if !r.stopAllShards(srv, &lt, log) {
+					log.Info("STOP not yet delivered to all spokes, retrying before finalizer removal")
+					return ctrl.Result{RequeueAfter: r.requeueInterval()}, nil
+				}
 				srv.ClearReplayStatuses(lt.Namespace, lt.Name)
 			}
 			controllerutil.RemoveFinalizer(&lt, LoadTestFinalizer)
@@ -174,10 +183,25 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Aggregate shard progress into the load test status.
 	r.aggregate(&lt, statuses)
 
-	// Enforce the abort policy while the run is live.
+	// Enforce the abort policy while the run is live. The Aborted phase is
+	// only entered once every connected spoke has accepted the STOP
+	// directive; until then the reconciler keeps retrying (the abort
+	// conditions are monotonic, so the decision is stable across retries).
 	if reason := r.shouldAbort(&lt); reason != "" {
 		log.Info("aborting load test", "reason", reason)
-		r.stopAllShards(srv, &lt, log)
+		if !r.stopAllShards(srv, &lt, log) {
+			log.Info("STOP not yet delivered to all spokes, retrying abort")
+			meta.SetStatusCondition(&lt.Status.Conditions, metav1.Condition{
+				Type:    capturev1alpha1.LoadTestConditionAborted,
+				Status:  metav1.ConditionFalse,
+				Reason:  "AbortInProgress",
+				Message: reason,
+			})
+			if err := r.Status().Update(ctx, &lt); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: r.requeueInterval()}, nil
+		}
 		now := metav1.Now()
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseAborted
 		lt.Status.CompletionTime = &now
@@ -326,19 +350,33 @@ func (r *CaptureLoadTestReconciler) buildStartDirective(lt *capturev1alpha1.Capt
 	}
 }
 
-// stopAllShards sends STOP directives to every assigned spoke.
-func (r *CaptureLoadTestReconciler) stopAllShards(srv *Server, lt *capturev1alpha1.CaptureLoadTest, log logr.Logger) {
+// stopAllShards sends STOP directives to every assigned spoke and reports
+// whether every directive was accepted. A spoke that is no longer
+// registered (NotFound) counts as delivered: it cannot be reached, and its
+// shards are bounded by the capture size anyway. Any other failure (e.g. a
+// full directive buffer) means the caller must retry — STOP directives are
+// idempotent, so re-sending to spokes that already received one is safe.
+func (r *CaptureLoadTestReconciler) stopAllShards(srv *Server, lt *capturev1alpha1.CaptureLoadTest, log logr.Logger) bool {
 	directive := &hubv1.ReplayDirective{
 		DirectiveId:       fmt.Sprintf("%s-%s-stop", lt.Namespace, lt.Name),
 		Action:            hubv1.ReplayAction_REPLAY_ACTION_STOP,
 		LoadTestName:      lt.Name,
 		LoadTestNamespace: lt.Namespace,
 	}
+	allDelivered := true
 	for _, assignment := range lt.Status.Assignments {
-		if err := srv.SendReplayDirective(assignment.SpokeID, directive); err != nil {
-			log.Info("failed to send stop directive", "spoke", assignment.SpokeID, "error", err.Error())
+		err := srv.SendReplayDirective(assignment.SpokeID, directive)
+		if err == nil {
+			continue
 		}
+		if status.Code(err) == codes.NotFound {
+			log.Info("spoke deregistered, skipping stop directive", "spoke", assignment.SpokeID)
+			continue
+		}
+		log.Info("failed to send stop directive", "spoke", assignment.SpokeID, "error", err.Error())
+		allDelivered = false
 	}
+	return allDelivered
 }
 
 // aggregate rolls shard statuses up into the load test status and advances

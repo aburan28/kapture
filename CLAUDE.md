@@ -40,7 +40,8 @@ config/crd/bases/      # Generated CRD YAML manifests
 charts/kapture/        # Helm chart (templates, values, CRDs, unit tests)
 test/
   integration/         # envtest-based integration tests
-  e2e/                 # Kind cluster end-to-end tests
+  e2e/                 # Kind cluster end-to-end tests (incl. load-test sharding)
+verification/tla/      # TLA+ specs model-checked by TLC in CI
 ui/                    # Next.js web dashboard (React 19, Tailwind CSS)
 .github/workflows/     # CI (ci.yaml) and E2E (e2e.yaml) pipelines
 ```
@@ -76,8 +77,13 @@ go test ./test/integration/... -v -race -timeout 300s
 # Helm unit tests
 helm unittest charts/kapture
 
-# E2E tests (requires Kind cluster with Gateway API CRDs)
+# E2E tests (requires Kind cluster with Gateway API CRDs; the load-test
+# e2e tests additionally need the hub-spoke wiring from .github/workflows/e2e.yaml
+# and skip themselves when the e2e CaptureHub CR is absent)
 go test ./test/e2e/... -v -timeout 30m
+
+# TLA+ model checking (requires java; downloads tla2tools.jar)
+make verify-tla
 
 # UI tests
 cd ui && npm test

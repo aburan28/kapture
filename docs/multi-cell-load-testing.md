@@ -178,6 +178,29 @@ heartbeats repopulate them within one interval, and the recorded
 `status.assignments` on the CaptureLoadTest let the coordinator re-send
 directives idempotently.
 
+## Verification
+
+Two layers of machine-checked verification back the sharding and
+coordination claims above:
+
+- **TLA+ model checking** (`verification/tla/`, run by
+  `.github/workflows/tla.yaml` and `make verify-tla`): `Sharding.tla`
+  checks that shard slices are disjoint and exhaustive for *every*
+  possible hash assignment, including across Job retries;
+  `KaptureLoadTest.tla` checks the hub-spoke coordination protocol under
+  full directive buffers, duplicate directive resends, shard failures,
+  and a hub restart — including that deletion and abort can never orphan
+  running shards. See `verification/tla/README.md` for the property
+  catalogue and the explicit modelling assumptions.
+- **End-to-end tests** (`test/e2e/loadtest_test.go`, run by the e2e
+  workflow against a Kind cluster): a real `CaptureLoadTest` fans out
+  across shards on a cell-registered spoke, replaying a seeded capture
+  against a counting sink. The sink's request counter must equal the
+  seeded request count exactly — a duplicate shard slice would push it
+  over, a dropped slice under — and per-shard sent counts must sum to the
+  same total. The suite also covers cell targeting, `Pending` behaviour
+  for empty cells, and shard cleanup on deletion.
+
 ## Sizing guidance
 
 - One replay worker (shard) with `concurrencyPerWorker: 50` sustains roughly
