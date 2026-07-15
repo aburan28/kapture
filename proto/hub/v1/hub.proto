@@ -186,6 +186,9 @@ message ReplaySpec {
   string engine_name = 10;
   // Engine-specific configuration (JSON), passed through verbatim.
   bytes engine_config_json = 11;
+  // Target safety allowlist, enforced again on the spoke before the
+  // shard runs (defense in depth on top of the hub-side gate).
+  repeated string allowed_hosts = 12;
 }
 
 message ReplayRate {

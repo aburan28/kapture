@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -237,6 +238,13 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 	}
 	if tc.Spec.Capture.MaxBodyBytes != nil {
 		envs = append(envs, corev1.EnvVar{Name: "CAPTURE_MAX_BODY_BYTES", Value: fmt.Sprintf("%d", *tc.Spec.Capture.MaxBodyBytes)})
+	}
+	// Header redaction: "none" disables everything; otherwise the agent
+	// applies its default credential set plus any extras listed here.
+	if tc.Spec.Capture.DisableHeaderRedaction != nil && *tc.Spec.Capture.DisableHeaderRedaction {
+		envs = append(envs, corev1.EnvVar{Name: "CAPTURE_REDACT_HEADERS", Value: "none"})
+	} else if len(tc.Spec.Capture.RedactHeaders) > 0 {
+		envs = append(envs, corev1.EnvVar{Name: "CAPTURE_REDACT_HEADERS", Value: strings.Join(tc.Spec.Capture.RedactHeaders, ",")})
 	}
 
 	// Capture filters, enforced by the agent

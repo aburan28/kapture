@@ -1,12 +1,17 @@
 package spoke
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
@@ -315,6 +320,40 @@ func TestReplaySummaryFromStatus(t *testing.T) {
 	}
 }
 
+func TestTrafficReplayReconciler_DeniesDisallowedTarget(t *testing.T) {
+	scheme := directiveScheme(t)
+	tr := makeShardReplay()
+	tr.ObjectMeta.Finalizers = []string{replayFinalizerName}
+	tr.Spec.Safety = &capturev1alpha1.ReplaySafety{
+		AllowedHosts: []string{"*.perf.svc"},
+	}
+
+	cl := fakeClientWithStatus(t, scheme, tr)
+	r := &TrafficReplayReconciler{Client: cl, Scheme: scheme}
+
+	req := reconcileRequestFor(tr)
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := &capturev1alpha1.TrafficReplay{}
+	if err := cl.Get(context.Background(), req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != capturev1alpha1.TrafficReplayPhaseFailed {
+		t.Errorf("phase = %s, want Failed", got.Status.Phase)
+	}
+	denied := false
+	for _, cond := range got.Status.Conditions {
+		if cond.Reason == "TargetDenied" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Errorf("TargetDenied condition missing: %+v", got.Status.Conditions)
+	}
+}
+
 func TestReplayShardName(t *testing.T) {
 	if got := ReplayShardName("lt", 3); got != "lt-shard-3" {
 		t.Errorf("ReplayShardName = %q", got)
@@ -322,4 +361,18 @@ func TestReplayShardName(t *testing.T) {
 	if !strings.HasPrefix(ReplayJobName(makeShardReplay()), "lt-shard-1") {
 		t.Errorf("job name should derive from replay name")
 	}
+}
+
+// --- shared reconciler-test helpers ---
+
+func fakeClientWithStatus(t *testing.T, scheme *runtime.Scheme, objs ...client.Object) client.Client {
+	t.Helper()
+	return fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(objs...).WithStatusSubresource(objs...).Build()
+}
+
+func reconcileRequestFor(obj client.Object) ctrl.Request {
+	return ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: obj.GetNamespace(), Name: obj.GetName(),
+	}}
 }

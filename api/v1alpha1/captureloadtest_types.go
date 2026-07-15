@@ -25,6 +25,9 @@ const (
 	LoadTestConditionSpokesAssigned = "SpokesAssigned"
 	// LoadTestConditionAborted records why a run was aborted.
 	LoadTestConditionAborted = "Aborted"
+	// LoadTestConditionTargetAllowed indicates whether the replay target
+	// passed the safety allowlist.
+	LoadTestConditionTargetAllowed = "TargetAllowed"
 )
 
 // LoadTestDistribution controls how replay work is fanned out across the
@@ -126,6 +129,12 @@ type CaptureLoadTestSpec struct {
 	// ghz, or an installed plugin). Defaults to the builtin sender.
 	// +optional
 	Engine *ReplayEngineSpec `json:"engine,omitempty"`
+
+	// Safety guards where replayed traffic may be sent. Enforced by the
+	// hub before any shard is distributed, and again by every spoke
+	// before running a shard.
+	// +optional
+	Safety *ReplaySafety `json:"safety,omitempty"`
 }
 
 // LoadTestCellStatus aggregates progress for one cell.

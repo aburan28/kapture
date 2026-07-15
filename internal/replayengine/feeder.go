@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -53,7 +54,16 @@ type FeederConfig struct {
 type Feeder struct {
 	cfg FeederConfig
 	log *slog.Logger
+
+	fed     atomic.Int64 // items sent to the engine
+	skipped atomic.Int64 // items owned by other shards
 }
+
+// Fed returns how many items were streamed to the engine.
+func (f *Feeder) Fed() int64 { return f.fed.Load() }
+
+// Skipped returns how many items were skipped by the shard filter.
+func (f *Feeder) Skipped() int64 { return f.skipped.Load() }
 
 // NewFeeder validates the config and creates a Feeder.
 func NewFeeder(cfg FeederConfig) (*Feeder, error) {
@@ -140,6 +150,7 @@ func (f *Feeder) feed(ctx context.Context, stream interface {
 		// clock, so each shard reproduces the timeline of its own subset
 		// (same semantics as the builtin engine's readLoop).
 		if !replay.ShardOwns(req.ID, f.cfg.ShardIndex, f.cfg.ShardCount) {
+			f.skipped.Add(1)
 			continue
 		}
 
@@ -179,6 +190,7 @@ func (f *Feeder) feed(ctx context.Context, stream interface {
 		}); err != nil {
 			return fmt.Errorf("send feed item: %w", err)
 		}
+		f.fed.Add(1)
 	}
 }
 

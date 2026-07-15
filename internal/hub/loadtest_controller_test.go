@@ -8,6 +8,10 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	runtime2 "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
@@ -247,6 +251,59 @@ func TestAggregate_RollsUpAndTransitionsPhase(t *testing.T) {
 	r.aggregate(lt2, mixed)
 	if lt2.Status.Phase != capturev1alpha1.CaptureLoadTestPhaseFailed {
 		t.Errorf("phase = %s, want Failed", lt2.Status.Phase)
+	}
+}
+
+func TestReconcile_DeniesDisallowedTarget(t *testing.T) {
+	scheme := runtime2.NewScheme()
+	if err := capturev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	lt := newLoadTest("denied")
+	lt.Spec.Target.Host = "prod-api.example.com"
+	lt.Spec.Safety = &capturev1alpha1.ReplaySafety{
+		AllowedHosts: []string{"*.staging.internal"},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(lt).WithStatusSubresource(lt).Build()
+
+	srv := NewServer(":0")
+	registerSpokeInCell(t, srv, "spoke-a", "cell-a")
+
+	r := &CaptureLoadTestReconciler{
+		Client:         cl,
+		Log:            logr.Discard(),
+		ServerProvider: func() *Server { return srv },
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "denied"}}
+	// First reconcile adds the finalizer; second hits the safety gate.
+	for i := 0; i < 2; i++ {
+		if _, err := r.Reconcile(context.Background(), req); err != nil {
+			t.Fatalf("Reconcile #%d: %v", i+1, err)
+		}
+	}
+
+	got := &capturev1alpha1.CaptureLoadTest{}
+	if err := cl.Get(context.Background(), req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != capturev1alpha1.CaptureLoadTestPhaseFailed {
+		t.Errorf("phase = %s, want Failed", got.Status.Phase)
+	}
+	denied := false
+	for _, cond := range got.Status.Conditions {
+		if cond.Type == capturev1alpha1.LoadTestConditionTargetAllowed &&
+			cond.Status == metav1.ConditionFalse && cond.Reason == "TargetDenied" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Errorf("TargetAllowed condition missing: %+v", got.Status.Conditions)
+	}
+	if len(got.Status.Assignments) != 0 {
+		t.Errorf("denied load test was distributed: %+v", got.Status.Assignments)
 	}
 }
 

@@ -138,10 +138,11 @@ func main() {
 	}
 
 	handler := agent.NewCaptureHandler(agent.CaptureHandlerConfig{
-		Writer:       bufferedWriter,
-		MaxBodyBytes: *maxBodyBytes,
-		Filter:       requestFilter,
-		Logger:       log,
+		Writer:        bufferedWriter,
+		MaxBodyBytes:  *maxBodyBytes,
+		Filter:        requestFilter,
+		RedactHeaders: parseRedactHeaders(os.Getenv("CAPTURE_REDACT_HEADERS")),
+		Logger:        log,
 	})
 
 	server := agent.NewAgentServer(agent.AgentServerConfig{
@@ -281,6 +282,27 @@ func splitCaptureID(captureID string) (string, string) {
 		return "", captureID
 	}
 	return namespace, name
+}
+
+// parseRedactHeaders interprets CAPTURE_REDACT_HEADERS: unset/empty keeps
+// the agent's default credential redaction, "none" disables all redaction,
+// anything else is a comma-separated list of extra headers to redact on
+// top of the defaults.
+func parseRedactHeaders(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil // handler applies DefaultRedactHeaders
+	}
+	if strings.EqualFold(value, "none") {
+		return []string{} // non-nil empty: redaction disabled
+	}
+	headers := append([]string{}, agent.DefaultRedactHeaders...)
+	for _, h := range strings.Split(value, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			headers = append(headers, h)
+		}
+	}
+	return headers
 }
 
 func envOr(key, fallback string) string {

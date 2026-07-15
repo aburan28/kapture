@@ -155,6 +155,10 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 		replay.Spec.Engine = engine
 	}
 
+	if len(spec.AllowedHosts) > 0 {
+		replay.Spec.Safety = &capturev1alpha1.ReplaySafety{AllowedHosts: spec.AllowedHosts}
+	}
+
 	if rate := spec.Rate; rate != nil {
 		rateConfig := &capturev1alpha1.ReplayRateConfig{
 			Mode: capturev1alpha1.ReplayRateMode(rate.Mode),

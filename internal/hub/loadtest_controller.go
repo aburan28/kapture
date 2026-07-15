@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
+	"github.com/kapture-io/kapture/internal/safety"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
@@ -105,6 +106,25 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	case capturev1alpha1.CaptureLoadTestPhaseCompleted,
 		capturev1alpha1.CaptureLoadTestPhaseFailed,
 		capturev1alpha1.CaptureLoadTestPhaseAborted:
+		return ctrl.Result{}, nil
+	}
+
+	// Target safety gate: a denied target is a configuration error, not a
+	// transient condition — fail terminally before any shard exists.
+	if lt.Spec.Safety != nil && !safety.HostAllowed(lt.Spec.Target.Host, lt.Spec.Safety.AllowedHosts) {
+		log.Info("replay target denied by safety allowlist",
+			"target", lt.Spec.Target.Host, "allowedHosts", lt.Spec.Safety.AllowedHosts)
+		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseFailed
+		meta.SetStatusCondition(&lt.Status.Conditions, metav1.Condition{
+			Type:   capturev1alpha1.LoadTestConditionTargetAllowed,
+			Status: metav1.ConditionFalse,
+			Reason: "TargetDenied",
+			Message: fmt.Sprintf("target host %q matches no pattern in spec.safety.allowedHosts %v",
+				lt.Spec.Target.Host, lt.Spec.Safety.AllowedHosts),
+		})
+		if err := r.Status().Update(ctx, &lt); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -314,6 +334,10 @@ func (r *CaptureLoadTestReconciler) buildStartDirective(lt *capturev1alpha1.Capt
 		if engine.Config != nil {
 			spec.EngineConfigJson = engine.Config.Raw
 		}
+	}
+
+	if lt.Spec.Safety != nil {
+		spec.AllowedHosts = lt.Spec.Safety.AllowedHosts
 	}
 
 	if rate := lt.Spec.Rate; rate != nil {

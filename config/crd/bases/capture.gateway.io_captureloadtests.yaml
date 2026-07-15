@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.16.5
   name: captureloadtests.capture.gateway.io
 spec:
   group: capture.gateway.io
@@ -209,6 +209,23 @@ spec:
                     type: string
                 required:
                 - mode
+                type: object
+              safety:
+                description: |-
+                  Safety guards where replayed traffic may be sent. Enforced by the
+                  hub before any shard is distributed, and again by every spoke
+                  before running a shard.
+                properties:
+                  allowedHosts:
+                    description: |-
+                      AllowedHosts restricts the replay target. Patterns are exact
+                      hostnames ("staging-api.internal") or wildcard subdomains
+                      ("*.staging.internal"). Empty means no restriction (the policy is
+                      opt-in); once set, a target that matches no pattern is rejected
+                      before any traffic is generated.
+                    items:
+                      type: string
+                    type: array
                 type: object
               sourceRef:
                 description: |-

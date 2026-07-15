@@ -67,9 +67,11 @@ hub:
     type: ClusterIP
     port: 9443
   tls:
-    # -- Name of the TLS secret for the hub gRPC server
+    # -- DEPRECATED and unused: the hub gRPC server reads its TLS material
+    # from the CaptureHub CR (spec.tls.certSecretRef + spec.authentication)
+    # via the Kubernetes API, not from a mounted volume. Kept only so
+    # existing values files keep parsing; will be removed.
     secretName: ""
-    # -- Namespace of the TLS secret
     secretNamespace: ""
   # -- Node selector for hub pods
   nodeSelector: {}

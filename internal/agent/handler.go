@@ -28,6 +28,7 @@ type CaptureHandler struct {
 	writer       storage.Writer
 	maxBodyBytes int64
 	filter       *RequestFilter
+	redactor     *HeaderRedactor
 	log          *slog.Logger
 
 	// Metrics
@@ -43,7 +44,11 @@ type CaptureHandlerConfig struct {
 	MaxBodyBytes int64
 	// Filter optionally narrows which requests are captured; nil captures all.
 	Filter *RequestFilter
-	Logger *slog.Logger
+	// RedactHeaders lists headers whose values are replaced with
+	// RedactedValue before storage. Nil applies DefaultRedactHeaders; an
+	// explicit empty (non-nil) slice disables redaction.
+	RedactHeaders []string
+	Logger        *slog.Logger
 }
 
 // NewCaptureHandler creates a CaptureHandler with the given configuration.
@@ -54,10 +59,14 @@ func NewCaptureHandler(cfg CaptureHandlerConfig) *CaptureHandler {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.RedactHeaders == nil {
+		cfg.RedactHeaders = DefaultRedactHeaders
+	}
 	return &CaptureHandler{
 		writer:       cfg.Writer,
 		maxBodyBytes: cfg.MaxBodyBytes,
 		filter:       cfg.Filter,
+		redactor:     NewHeaderRedactor(cfg.RedactHeaders),
 		log:          cfg.Logger,
 	}
 }
@@ -86,6 +95,10 @@ func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) e
 	}
 
 	h.bytesReceived.Add(int64(len(body)))
+
+	// Credential headers must never become durable capture data. Filters
+	// have already run, so header-based filtering still sees originals.
+	h.redactor.Redact(req.Headers)
 
 	captured := &storage.CapturedRequest{
 		ID:            uuid.New().String(),
@@ -119,4 +132,3 @@ func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) e
 func (h *CaptureHandler) Metrics() (total, filtered, dropped, bytesRecv int64) {
 	return h.requestsTotal.Load(), h.requestsFiltered.Load(), h.requestsDropped.Load(), h.bytesReceived.Load()
 }
-

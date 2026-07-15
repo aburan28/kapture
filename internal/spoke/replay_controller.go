@@ -19,6 +19,7 @@ import (
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	"github.com/kapture-io/kapture/internal/plugin/replay"
+	"github.com/kapture-io/kapture/internal/safety"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
@@ -71,6 +72,17 @@ func (r *TrafficReplayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	switch tr.Status.Phase {
 	case capturev1alpha1.TrafficReplayPhaseCompleted, capturev1alpha1.TrafficReplayPhaseFailed:
 		return ctrl.Result{}, nil
+	}
+
+	// Target safety gate (defense in depth: the hub already checked the
+	// load-test target, but user-created replays and stale directives are
+	// checked here before any worker exists).
+	if tr.Spec.Safety != nil && !safety.HostAllowed(tr.Spec.Target.Host, tr.Spec.Safety.AllowedHosts) {
+		logger.Info("replay target denied by safety allowlist",
+			"target", tr.Spec.Target.Host, "allowedHosts", tr.Spec.Safety.AllowedHosts)
+		return r.setPhase(ctx, tr, capturev1alpha1.TrafficReplayPhaseFailed,
+			"TargetDenied", fmt.Sprintf("target host %q matches no pattern in spec.safety.allowedHosts %v",
+				tr.Spec.Target.Host, tr.Spec.Safety.AllowedHosts))
 	}
 
 	// Resolve the storage backend the replay reads from.

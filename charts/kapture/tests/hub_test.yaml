@@ -59,26 +59,12 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: should render hub deployment with TLS secret
+  - it: should expose POD_NAMESPACE for CaptureHub TLS secret resolution
     template: hub-deployment.yaml
-    set:
-      hub.tls.secretName: my-tls-secret
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].volumeMounts[0].name
-          value: tls
-      - equal:
-          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
-          value: /etc/tls
-      - equal:
-          path: spec.template.spec.containers[0].volumeMounts[0].readOnly
-          value: true
-      - equal:
-          path: spec.template.spec.volumes[0].name
-          value: tls
-      - equal:
-          path: spec.template.spec.volumes[0].secret.secretName
-          value: my-tls-secret
+          path: spec.template.spec.containers[0].env[0].name
+          value: POD_NAMESPACE
 
   - it: should render hub deployment with nodeSelector and tolerations
     template: hub-deployment.yaml

@@ -87,6 +87,9 @@ type config struct {
 	logLevel    string
 	logFormat   string
 	summaryPath string
+
+	// Safety
+	failOnEmpty bool
 }
 
 func main() {
@@ -151,6 +154,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.logFormat, "log-format", "text", "Log format: text, json")
 	flag.StringVar(&cfg.summaryPath, "summary-path", "", "Write a JSON run report to this file on completion (e.g. /dev/termination-log)")
+	flag.BoolVar(&cfg.failOnEmpty, "fail-on-empty", true, "Fail when no captured requests exist for --capture-id (catches typos and missing preshard layouts)")
 
 	flag.Parse()
 	return cfg
@@ -260,6 +264,13 @@ func runExternalEngine(ctx context.Context, cfg config, reader replay.Reader, lo
 	report, err := feeder.Run(ctx, engine)
 	if err != nil {
 		return fmt.Errorf("engine %s run: %w", cfg.engine, err)
+	}
+
+	// An entirely empty read means the capture ID points at nothing —
+	// typically a typo or a missing preshard slice layout. Completing
+	// "successfully" with zero requests would silently mask that.
+	if cfg.failOnEmpty && feeder.Fed() == 0 && feeder.Skipped() == 0 {
+		return fmt.Errorf("no captured requests found for capture-id %q (missing capture or preshard layout?); pass --fail-on-empty=false to allow empty replays", cfg.captureID)
 	}
 
 	logger.Info("replay complete",
@@ -453,6 +464,10 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 
 	if err != nil {
 		return fmt.Errorf("replay engine: %w", err)
+	}
+
+	if cfg.failOnEmpty && summary.TotalRequests == 0 && summary.FilteredCount == 0 && engine.ShardSkipped() == 0 {
+		return fmt.Errorf("no captured requests found for capture-id %q (missing capture or preshard layout?); pass --fail-on-empty=false to allow empty replays", cfg.captureID)
 	}
 
 	printSummary(summary, logger)

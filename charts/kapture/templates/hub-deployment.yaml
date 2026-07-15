@@ -34,18 +34,6 @@ spec:
                   fieldPath: metadata.namespace
           resources:
             {{- toYaml .Values.hub.resources | nindent 12 }}
-          {{- if .Values.hub.tls.secretName }}
-          volumeMounts:
-            - name: tls
-              mountPath: /etc/tls
-              readOnly: true
-          {{- end }}
-      {{- if .Values.hub.tls.secretName }}
-      volumes:
-        - name: tls
-          secret:
-            secretName: {{ .Values.hub.tls.secretName }}
-      {{- end }}
       {{- with .Values.hub.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

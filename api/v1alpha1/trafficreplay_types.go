@@ -131,6 +131,20 @@ type ReplayEngineSpec struct {
 	Config *runtime.RawExtension `json:"config,omitempty"`
 }
 
+// ReplaySafety guards where replayed traffic may be sent. Replaying a
+// production capture at the production host by mistake is the worst
+// failure mode of a load-testing system; the allowlist makes the blast
+// radius an explicit, reviewable part of the spec.
+type ReplaySafety struct {
+	// AllowedHosts restricts the replay target. Patterns are exact
+	// hostnames ("staging-api.internal") or wildcard subdomains
+	// ("*.staging.internal"). Empty means no restriction (the policy is
+	// opt-in); once set, a target that matches no pattern is rejected
+	// before any traffic is generated.
+	// +optional
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+}
+
 // ReplayTransformRef references a named transformer plugin.
 type ReplayTransformRef struct {
 	// Name is the registered transformer plugin name (e.g., "header-rewriter").
@@ -184,6 +198,10 @@ type TrafficReplaySpec struct {
 	// Engine selects the replay engine. Defaults to the builtin sender.
 	// +optional
 	Engine *ReplayEngineSpec `json:"engine,omitempty"`
+
+	// Safety guards where replayed traffic may be sent.
+	// +optional
+	Safety *ReplaySafety `json:"safety,omitempty"`
 }
 
 // TrafficReplayStatus defines the observed state of TrafficReplay.

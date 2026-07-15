@@ -291,3 +291,33 @@ Spokes mount their client certificate secret via Helm:
 Without `authentication.type: mTLS` the hub serves TLS without requiring
 client certificates. Certificate rotation currently requires changing the
 secret name (or restarting the hub); in-place rotation is future work.
+
+With mTLS enabled, the hub also **binds spoke identity to the
+certificate**: a spoke may only register, heartbeat, watch directives, or
+report status as the `spoke_id` matching its client certificate's
+CommonName or a DNS SAN. Issue one certificate per spoke with the spoke
+name as CN — a shared fleet certificate would let any spoke impersonate
+any other.
+
+## Target safety and credential handling
+
+- **Target allowlist**: set `spec.safety.allowedHosts` on a
+  CaptureLoadTest (or TrafficReplay) to fence where replayed traffic may
+  go — exact hostnames or `*.subdomain` wildcards. The hub fails the load
+  test with a `TargetAllowed: False` condition before distributing any
+  shard, and every spoke re-checks before creating a worker Job. This is
+  the guard against pointing recorded production traffic back at
+  production.
+- **Credential redaction**: capture agents replace the values of
+  credential headers (Authorization, Proxy-Authorization, Cookie,
+  Set-Cookie, X-Api-Key, X-Auth-Token) with `[REDACTED]` before requests
+  become durable capture data. Add more via
+  `spec.capture.redactHeaders`; opt out (trusted pipelines only) with
+  `spec.capture.disableHeaderRedaction: true`. Replays inject fresh
+  credentials via engine header overrides instead of resending recorded
+  ones.
+- **Empty-replay preflight**: replay workers fail (instead of completing
+  with zero requests) when the capture ID resolves to no data — the
+  usual causes are a typo or a `presharded: true` run whose slice layout
+  was never built with `kapture-preshard`. Override with
+  `--fail-on-empty=false` for intentionally-empty replays.

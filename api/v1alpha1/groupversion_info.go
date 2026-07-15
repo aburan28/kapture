@@ -41,6 +41,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&CaptureHubList{},
 		&TrafficReplay{},
 		&TrafficReplayList{},
+		&CaptureLoadTest{},
+		&CaptureLoadTestList{},
 	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil

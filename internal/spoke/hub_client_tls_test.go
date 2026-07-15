@@ -152,10 +152,12 @@ func TestHubSpokeMTLS_EndToEnd(t *testing.T) {
 		t.Fatalf("BuildHubTLSConfig: %v", err)
 	}
 
+	// The spoke name must match the client certificate identity
+	// (CN "kapture-spoke"): the hub binds spoke_id to the cert.
 	client := NewHubClient(HubClientConfig{
 		HubAddress: addr,
-		SpokeName:  "tls-spoke",
-		ClusterID:  "tls-spoke",
+		SpokeName:  "kapture-spoke",
+		ClusterID:  "kapture-spoke",
 		Cell:       "cell-tls",
 		TLSConfig:  tlsCfg,
 		Logger:     logr.Discard(),
@@ -169,6 +171,25 @@ func TestHubSpokeMTLS_EndToEnd(t *testing.T) {
 	defer regCancel()
 	if _, err := client.Register(regCtx); err != nil {
 		t.Fatalf("Register over mTLS: %v", err)
+	}
+
+	// Impersonation: a valid fleet certificate must not allow registering
+	// under a different spoke_id than its certificate identity.
+	impostor := NewHubClient(HubClientConfig{
+		HubAddress: addr,
+		SpokeName:  "some-other-spoke",
+		ClusterID:  "some-other-spoke",
+		TLSConfig:  tlsCfg, // same valid cert, wrong claimed identity
+		Logger:     logr.Discard(),
+	})
+	if err := impostor.Connect(ctx); err != nil {
+		t.Fatalf("Connect (impostor): %v", err)
+	}
+	defer impostor.Close()
+	impCtx, impCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer impCancel()
+	if _, err := impostor.Register(impCtx); err == nil {
+		t.Fatal("registration under a spoke_id not matching the certificate succeeded; identity binding not enforced")
 	}
 
 	// Client without a certificate: the hub must reject it.

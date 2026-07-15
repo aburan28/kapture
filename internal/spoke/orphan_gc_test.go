@@ -36,10 +36,10 @@ func gcReplay(name, loadTest string, age time.Duration) *capturev1alpha1.Traffic
 func TestOrphanShardGC_DeletesOnlyAgedOrphans(t *testing.T) {
 	scheme := directiveScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		gcReplay("live-shard", "live-lt", time.Hour),     // load test still exists
-		gcReplay("orphan-shard", "gone-lt", time.Hour),   // orphaned and old → GC
-		gcReplay("young-orphan", "new-lt", time.Second),  // orphaned but young → keep
-		gcReplay("standalone", "", time.Hour),            // user-managed → keep
+		gcReplay("live-shard", "live-lt", time.Hour),    // load test still exists
+		gcReplay("orphan-shard", "gone-lt", time.Hour),  // orphaned and old → GC
+		gcReplay("young-orphan", "new-lt", time.Second), // orphaned but young → keep
+		gcReplay("standalone", "", time.Hour),           // user-managed → keep
 	).Build()
 
 	gc := &OrphanShardGC{Client: cl, Log: logr.Discard()}

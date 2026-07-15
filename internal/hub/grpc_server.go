@@ -110,9 +110,12 @@ func (s *Server) GRPCServer() *grpc.Server {
 // --- Spoke lifecycle RPCs ---
 
 // RegisterSpoke registers a spoke cluster with the hub.
-func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
+func (s *Server) RegisterSpoke(ctx context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
@@ -149,9 +152,12 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 }
 
 // Heartbeat updates the last-seen timestamp for a spoke.
-func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hubv1.HeartbeatResponse, error) {
+func (s *Server) Heartbeat(ctx context.Context, req *hubv1.HeartbeatRequest) (*hubv1.HeartbeatResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
@@ -198,9 +204,12 @@ func (s *Server) SetActiveLoadTests(keys []*hubv1.LoadTestKey, complete bool) {
 }
 
 // DeregisterSpoke removes a spoke from the registry.
-func (s *Server) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
+func (s *Server) DeregisterSpoke(ctx context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -222,6 +231,9 @@ func (s *Server) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRe
 func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.ServerStreamingServer[hubv1.WatchDirectivesResponse]) error {
 	if req.GetSpokeId() == "" {
 		return status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(stream.Context(), req.SpokeId); err != nil {
+		return err
 	}
 
 	s.mu.RLock()
@@ -313,9 +325,12 @@ func (s *Server) BroadcastDirective(directive *hubv1.CaptureDirective) int {
 // --- Status reporting ---
 
 // ReportCaptureStatus receives capture status updates from a spoke.
-func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
+func (s *Server) ReportCaptureStatus(ctx context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 	if len(req.GetStatuses()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one status is required")
@@ -339,9 +354,12 @@ func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCapture
 }
 
 // ReportReplayStatus receives replay shard status updates from a spoke.
-func (s *Server) ReportReplayStatus(_ context.Context, req *hubv1.ReportReplayStatusRequest) (*hubv1.ReportReplayStatusResponse, error) {
+func (s *Server) ReportReplayStatus(ctx context.Context, req *hubv1.ReportReplayStatusRequest) (*hubv1.ReportReplayStatusResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 	if len(req.GetStatuses()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one status is required")

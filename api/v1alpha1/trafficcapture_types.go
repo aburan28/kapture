@@ -53,6 +53,20 @@ type CaptureSettings struct {
 	MaxBodyBytes *int64 `json:"maxBodyBytes,omitempty"`
 	// +optional
 	Duration *string `json:"duration,omitempty"`
+
+	// RedactHeaders lists additional headers whose values are replaced
+	// with "[REDACTED]" before captured requests are stored, on top of the
+	// default credential set (Authorization, Proxy-Authorization, Cookie,
+	// Set-Cookie, X-Api-Key, X-Auth-Token).
+	// +optional
+	RedactHeaders []string `json:"redactHeaders,omitempty"`
+
+	// DisableHeaderRedaction turns off ALL header redaction, including the
+	// default credential set. Captured credentials then become durable
+	// storage data and are re-sent verbatim on replay — only use this when
+	// the capture pipeline and storage are trusted with live secrets.
+	// +optional
+	DisableHeaderRedaction *bool `json:"disableHeaderRedaction,omitempty"`
 }
 
 // AgentScalingSpec configures capture agent scaling.
