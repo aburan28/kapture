@@ -114,6 +114,15 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                  presharded:
+                    description: |-
+                      Presharded indicates the source capture was pre-partitioned with
+                      kapture-preshard into exactly totalShards slices (participating
+                      spokes × workersPerSpoke). Each worker then reads only its own
+                      slice, cutting aggregate storage reads by a factor of the shard
+                      count. Combine with maxSpokes to pin the shard count to the
+                      presharded layout.
+                    type: boolean
                   workersPerSpoke:
                     default: 1
                     description: |-

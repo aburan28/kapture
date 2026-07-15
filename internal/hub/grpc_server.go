@@ -51,6 +51,14 @@ type Server struct {
 	mu     sync.RWMutex
 	spokes map[string]*spokeEntry // key: spoke_id
 
+	// activeLoadTests is the authoritative CaptureLoadTest list pushed by
+	// the CaptureHub reconciler from the CR store. It rides on heartbeat
+	// responses so spokes can garbage-collect orphaned replay shards.
+	// activeLoadTestsComplete is false until the reconciler has managed a
+	// successful CR list, so a cold cache never looks like "no load tests".
+	activeLoadTests         []*hubv1.LoadTestKey
+	activeLoadTestsComplete bool
+
 	grpcServer *grpc.Server
 	address    string
 }
@@ -172,7 +180,21 @@ func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hub
 	}
 	entry.info.ActiveReplays = activeReplayCount(entry.replays)
 
-	return &hubv1.HeartbeatResponse{Acknowledged: true}, nil
+	return &hubv1.HeartbeatResponse{
+		Acknowledged:            true,
+		ActiveLoadTests:         s.activeLoadTests,
+		ActiveLoadTestsComplete: s.activeLoadTestsComplete,
+	}, nil
+}
+
+// SetActiveLoadTests publishes the authoritative CaptureLoadTest list for
+// heartbeat responses. complete must only be true when the list came from
+// a successful CR store read.
+func (s *Server) SetActiveLoadTests(keys []*hubv1.LoadTestKey, complete bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeLoadTests = keys
+	s.activeLoadTestsComplete = complete
 }
 
 // DeregisterSpoke removes a spoke from the registry.

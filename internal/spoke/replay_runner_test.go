@@ -153,6 +153,72 @@ func TestBuildReplayJob_ExternalEngineArgs(t *testing.T) {
 	}
 }
 
+func TestBuildReplayJob_PreshardedReadsSliceWithoutFilter(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Shard.Presharded = bl(true)
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if got := argValue(t, args, "--capture-id"); got != "default/orders/shards/1-of-4" {
+		t.Errorf("--capture-id = %q, want the shard slice path", got)
+	}
+	if slices.Contains(args, "--shard-index") || slices.Contains(args, "--shard-count") {
+		t.Errorf("presharded replay must not hash-filter: %v", args)
+	}
+}
+
+func TestBuildReplayJob_PluginInstallerInitContainer(t *testing.T) {
+	tr := makeShardReplay()
+	t.Setenv("REPLAY_PLUGIN_IMAGE", "kapture/replay-engine:plugins-v2")
+	t.Setenv("REPLAY_PLUGIN_DIR", "/opt/plugins")
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	inits := job.Spec.Template.Spec.InitContainers
+	if len(inits) != 1 {
+		t.Fatalf("got %d initContainers, want 1", len(inits))
+	}
+	if inits[0].Image != "kapture/replay-engine:plugins-v2" {
+		t.Errorf("installer image = %q", inits[0].Image)
+	}
+	if inits[0].Command[0] != "/plugin-installer" {
+		t.Errorf("installer command = %v", inits[0].Command)
+	}
+	if inits[0].VolumeMounts[0].MountPath != "/target" {
+		t.Errorf("installer mount = %+v", inits[0].VolumeMounts)
+	}
+
+	// The worker mounts the shared plugin volume at the plugin dir.
+	found := false
+	for _, m := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if m.Name == "engine-plugins" && m.MountPath == "/opt/plugins" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("worker missing plugin volume mount: %+v",
+			job.Spec.Template.Spec.Containers[0].VolumeMounts)
+	}
+}
+
+func TestBuildReplayJob_NoPluginImageNoInitContainer(t *testing.T) {
+	tr := makeShardReplay()
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("unexpected initContainers: %+v", job.Spec.Template.Spec.InitContainers)
+	}
+}
+
 func TestBuildReplayJob_BuiltinEngineOmitsEngineFlag(t *testing.T) {
 	tr := makeShardReplay()
 	tr.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{Name: "builtin"}

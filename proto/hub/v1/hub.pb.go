@@ -492,10 +492,18 @@ func (x *HeartbeatRequest) GetReplaySummaries() []*ReplayStatusSummary {
 }
 
 type HeartbeatResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Acknowledged  bool                   `protobuf:"varint,1,opt,name=acknowledged,proto3" json:"acknowledged,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Acknowledged bool                   `protobuf:"varint,1,opt,name=acknowledged,proto3" json:"acknowledged,omitempty"`
+	// Authoritative list of CaptureLoadTests currently known to the hub
+	// (from its CR store). Spokes garbage-collect local replay shards whose
+	// load test no longer exists — the backstop for STOP directives lost in
+	// a hub crash window. Only meaningful when active_load_tests_complete
+	// is true; an incomplete list (hub cache still syncing) must not
+	// trigger GC.
+	ActiveLoadTests         []*LoadTestKey `protobuf:"bytes,2,rep,name=active_load_tests,json=activeLoadTests,proto3" json:"active_load_tests,omitempty"`
+	ActiveLoadTestsComplete bool           `protobuf:"varint,3,opt,name=active_load_tests_complete,json=activeLoadTestsComplete,proto3" json:"active_load_tests_complete,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *HeartbeatResponse) Reset() {
@@ -535,6 +543,73 @@ func (x *HeartbeatResponse) GetAcknowledged() bool {
 	return false
 }
 
+func (x *HeartbeatResponse) GetActiveLoadTests() []*LoadTestKey {
+	if x != nil {
+		return x.ActiveLoadTests
+	}
+	return nil
+}
+
+func (x *HeartbeatResponse) GetActiveLoadTestsComplete() bool {
+	if x != nil {
+		return x.ActiveLoadTestsComplete
+	}
+	return false
+}
+
+// LoadTestKey identifies a CaptureLoadTest.
+type LoadTestKey struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoadTestKey) Reset() {
+	*x = LoadTestKey{}
+	mi := &file_hub_v1_hub_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoadTestKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoadTestKey) ProtoMessage() {}
+
+func (x *LoadTestKey) ProtoReflect() protoreflect.Message {
+	mi := &file_hub_v1_hub_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoadTestKey.ProtoReflect.Descriptor instead.
+func (*LoadTestKey) Descriptor() ([]byte, []int) {
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *LoadTestKey) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *LoadTestKey) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type DeregisterSpokeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SpokeId       string                 `protobuf:"bytes,1,opt,name=spoke_id,json=spokeId,proto3" json:"spoke_id,omitempty"`
@@ -545,7 +620,7 @@ type DeregisterSpokeRequest struct {
 
 func (x *DeregisterSpokeRequest) Reset() {
 	*x = DeregisterSpokeRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[4]
+	mi := &file_hub_v1_hub_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -557,7 +632,7 @@ func (x *DeregisterSpokeRequest) String() string {
 func (*DeregisterSpokeRequest) ProtoMessage() {}
 
 func (x *DeregisterSpokeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[4]
+	mi := &file_hub_v1_hub_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -570,7 +645,7 @@ func (x *DeregisterSpokeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeregisterSpokeRequest.ProtoReflect.Descriptor instead.
 func (*DeregisterSpokeRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{4}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeregisterSpokeRequest) GetSpokeId() string {
@@ -596,7 +671,7 @@ type DeregisterSpokeResponse struct {
 
 func (x *DeregisterSpokeResponse) Reset() {
 	*x = DeregisterSpokeResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[5]
+	mi := &file_hub_v1_hub_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -608,7 +683,7 @@ func (x *DeregisterSpokeResponse) String() string {
 func (*DeregisterSpokeResponse) ProtoMessage() {}
 
 func (x *DeregisterSpokeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[5]
+	mi := &file_hub_v1_hub_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -621,7 +696,7 @@ func (x *DeregisterSpokeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeregisterSpokeResponse.ProtoReflect.Descriptor instead.
 func (*DeregisterSpokeResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{5}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeregisterSpokeResponse) GetAcknowledged() bool {
@@ -640,7 +715,7 @@ type WatchDirectivesRequest struct {
 
 func (x *WatchDirectivesRequest) Reset() {
 	*x = WatchDirectivesRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[6]
+	mi := &file_hub_v1_hub_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +727,7 @@ func (x *WatchDirectivesRequest) String() string {
 func (*WatchDirectivesRequest) ProtoMessage() {}
 
 func (x *WatchDirectivesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[6]
+	mi := &file_hub_v1_hub_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +740,7 @@ func (x *WatchDirectivesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDirectivesRequest.ProtoReflect.Descriptor instead.
 func (*WatchDirectivesRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{6}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *WatchDirectivesRequest) GetSpokeId() string {
@@ -687,7 +762,7 @@ type WatchDirectivesResponse struct {
 
 func (x *WatchDirectivesResponse) Reset() {
 	*x = WatchDirectivesResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[7]
+	mi := &file_hub_v1_hub_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -699,7 +774,7 @@ func (x *WatchDirectivesResponse) String() string {
 func (*WatchDirectivesResponse) ProtoMessage() {}
 
 func (x *WatchDirectivesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[7]
+	mi := &file_hub_v1_hub_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -712,7 +787,7 @@ func (x *WatchDirectivesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDirectivesResponse.ProtoReflect.Descriptor instead.
 func (*WatchDirectivesResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{7}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchDirectivesResponse) GetDirective() *CaptureDirective {
@@ -743,7 +818,7 @@ type CaptureDirective struct {
 
 func (x *CaptureDirective) Reset() {
 	*x = CaptureDirective{}
-	mi := &file_hub_v1_hub_proto_msgTypes[8]
+	mi := &file_hub_v1_hub_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -755,7 +830,7 @@ func (x *CaptureDirective) String() string {
 func (*CaptureDirective) ProtoMessage() {}
 
 func (x *CaptureDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[8]
+	mi := &file_hub_v1_hub_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -768,7 +843,7 @@ func (x *CaptureDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureDirective.ProtoReflect.Descriptor instead.
 func (*CaptureDirective) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{8}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CaptureDirective) GetDirectiveId() string {
@@ -821,7 +896,7 @@ type CaptureSpec struct {
 
 func (x *CaptureSpec) Reset() {
 	*x = CaptureSpec{}
-	mi := &file_hub_v1_hub_proto_msgTypes[9]
+	mi := &file_hub_v1_hub_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -833,7 +908,7 @@ func (x *CaptureSpec) String() string {
 func (*CaptureSpec) ProtoMessage() {}
 
 func (x *CaptureSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[9]
+	mi := &file_hub_v1_hub_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -846,7 +921,7 @@ func (x *CaptureSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureSpec.ProtoReflect.Descriptor instead.
 func (*CaptureSpec) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{9}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CaptureSpec) GetTargetRouteGroup() string {
@@ -910,7 +985,7 @@ type CaptureSettings struct {
 
 func (x *CaptureSettings) Reset() {
 	*x = CaptureSettings{}
-	mi := &file_hub_v1_hub_proto_msgTypes[10]
+	mi := &file_hub_v1_hub_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -922,7 +997,7 @@ func (x *CaptureSettings) String() string {
 func (*CaptureSettings) ProtoMessage() {}
 
 func (x *CaptureSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[10]
+	mi := &file_hub_v1_hub_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -935,7 +1010,7 @@ func (x *CaptureSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureSettings.ProtoReflect.Descriptor instead.
 func (*CaptureSettings) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{10}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CaptureSettings) GetIncludeHeaders() bool {
@@ -977,7 +1052,7 @@ type CaptureFilters struct {
 
 func (x *CaptureFilters) Reset() {
 	*x = CaptureFilters{}
-	mi := &file_hub_v1_hub_proto_msgTypes[11]
+	mi := &file_hub_v1_hub_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +1064,7 @@ func (x *CaptureFilters) String() string {
 func (*CaptureFilters) ProtoMessage() {}
 
 func (x *CaptureFilters) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[11]
+	mi := &file_hub_v1_hub_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1077,7 @@ func (x *CaptureFilters) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureFilters.ProtoReflect.Descriptor instead.
 func (*CaptureFilters) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{11}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CaptureFilters) GetHeaders() []*HeaderMatch {
@@ -1036,7 +1111,7 @@ type HeaderMatch struct {
 
 func (x *HeaderMatch) Reset() {
 	*x = HeaderMatch{}
-	mi := &file_hub_v1_hub_proto_msgTypes[12]
+	mi := &file_hub_v1_hub_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1048,7 +1123,7 @@ func (x *HeaderMatch) String() string {
 func (*HeaderMatch) ProtoMessage() {}
 
 func (x *HeaderMatch) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[12]
+	mi := &file_hub_v1_hub_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1061,7 +1136,7 @@ func (x *HeaderMatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeaderMatch.ProtoReflect.Descriptor instead.
 func (*HeaderMatch) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{12}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HeaderMatch) GetName() string {
@@ -1090,7 +1165,7 @@ type AgentScaling struct {
 
 func (x *AgentScaling) Reset() {
 	*x = AgentScaling{}
-	mi := &file_hub_v1_hub_proto_msgTypes[13]
+	mi := &file_hub_v1_hub_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1102,7 +1177,7 @@ func (x *AgentScaling) String() string {
 func (*AgentScaling) ProtoMessage() {}
 
 func (x *AgentScaling) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[13]
+	mi := &file_hub_v1_hub_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1115,7 +1190,7 @@ func (x *AgentScaling) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScaling.ProtoReflect.Descriptor instead.
 func (*AgentScaling) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{13}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AgentScaling) GetReplicas() int32 {
@@ -1163,7 +1238,7 @@ type ReplayDirective struct {
 
 func (x *ReplayDirective) Reset() {
 	*x = ReplayDirective{}
-	mi := &file_hub_v1_hub_proto_msgTypes[14]
+	mi := &file_hub_v1_hub_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1175,7 +1250,7 @@ func (x *ReplayDirective) String() string {
 func (*ReplayDirective) ProtoMessage() {}
 
 func (x *ReplayDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[14]
+	mi := &file_hub_v1_hub_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1188,7 +1263,7 @@ func (x *ReplayDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayDirective.ProtoReflect.Descriptor instead.
 func (*ReplayDirective) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{14}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReplayDirective) GetDirectiveId() string {
@@ -1251,7 +1326,7 @@ type ReplaySpec struct {
 
 func (x *ReplaySpec) Reset() {
 	*x = ReplaySpec{}
-	mi := &file_hub_v1_hub_proto_msgTypes[15]
+	mi := &file_hub_v1_hub_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1263,7 +1338,7 @@ func (x *ReplaySpec) String() string {
 func (*ReplaySpec) ProtoMessage() {}
 
 func (x *ReplaySpec) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[15]
+	mi := &file_hub_v1_hub_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1276,7 +1351,7 @@ func (x *ReplaySpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplaySpec.ProtoReflect.Descriptor instead.
 func (*ReplaySpec) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{15}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReplaySpec) GetSourceCapture() string {
@@ -1371,7 +1446,7 @@ type ReplayRate struct {
 
 func (x *ReplayRate) Reset() {
 	*x = ReplayRate{}
-	mi := &file_hub_v1_hub_proto_msgTypes[16]
+	mi := &file_hub_v1_hub_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1383,7 +1458,7 @@ func (x *ReplayRate) String() string {
 func (*ReplayRate) ProtoMessage() {}
 
 func (x *ReplayRate) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[16]
+	mi := &file_hub_v1_hub_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1396,7 +1471,7 @@ func (x *ReplayRate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayRate.ProtoReflect.Descriptor instead.
 func (*ReplayRate) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{16}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ReplayRate) GetMode() string {
@@ -1424,16 +1499,19 @@ func (x *ReplayRate) GetTimeScale() string {
 // shard {index: i, count: n} replays only requests whose hashed request ID
 // modulo n equals i, so n workers cover the capture exactly once.
 type ReplayShard struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
-	Count         int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Index int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Count int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	// Presharded: the capture was pre-partitioned into per-shard slices
+	// (kapture-preshard); workers read only their slice with no filtering.
+	Presharded    bool `protobuf:"varint,3,opt,name=presharded,proto3" json:"presharded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReplayShard) Reset() {
 	*x = ReplayShard{}
-	mi := &file_hub_v1_hub_proto_msgTypes[17]
+	mi := &file_hub_v1_hub_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1445,7 +1523,7 @@ func (x *ReplayShard) String() string {
 func (*ReplayShard) ProtoMessage() {}
 
 func (x *ReplayShard) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[17]
+	mi := &file_hub_v1_hub_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1458,7 +1536,7 @@ func (x *ReplayShard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayShard.ProtoReflect.Descriptor instead.
 func (*ReplayShard) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{17}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ReplayShard) GetIndex() int32 {
@@ -1475,6 +1553,13 @@ func (x *ReplayShard) GetCount() int32 {
 	return 0
 }
 
+func (x *ReplayShard) GetPresharded() bool {
+	if x != nil {
+		return x.Presharded
+	}
+	return false
+}
+
 type ReplayDataFilters struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	StartTime  *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
@@ -1489,7 +1574,7 @@ type ReplayDataFilters struct {
 
 func (x *ReplayDataFilters) Reset() {
 	*x = ReplayDataFilters{}
-	mi := &file_hub_v1_hub_proto_msgTypes[18]
+	mi := &file_hub_v1_hub_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1501,7 +1586,7 @@ func (x *ReplayDataFilters) String() string {
 func (*ReplayDataFilters) ProtoMessage() {}
 
 func (x *ReplayDataFilters) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[18]
+	mi := &file_hub_v1_hub_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1514,7 +1599,7 @@ func (x *ReplayDataFilters) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayDataFilters.ProtoReflect.Descriptor instead.
 func (*ReplayDataFilters) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{18}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ReplayDataFilters) GetStartTime() *timestamppb.Timestamp {
@@ -1577,7 +1662,7 @@ type ReplayStatusSummary struct {
 
 func (x *ReplayStatusSummary) Reset() {
 	*x = ReplayStatusSummary{}
-	mi := &file_hub_v1_hub_proto_msgTypes[19]
+	mi := &file_hub_v1_hub_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1589,7 +1674,7 @@ func (x *ReplayStatusSummary) String() string {
 func (*ReplayStatusSummary) ProtoMessage() {}
 
 func (x *ReplayStatusSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[19]
+	mi := &file_hub_v1_hub_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1602,7 +1687,7 @@ func (x *ReplayStatusSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayStatusSummary.ProtoReflect.Descriptor instead.
 func (*ReplayStatusSummary) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{19}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReplayStatusSummary) GetLoadTestName() string {
@@ -1720,7 +1805,7 @@ type ReportReplayStatusRequest struct {
 
 func (x *ReportReplayStatusRequest) Reset() {
 	*x = ReportReplayStatusRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[20]
+	mi := &file_hub_v1_hub_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1732,7 +1817,7 @@ func (x *ReportReplayStatusRequest) String() string {
 func (*ReportReplayStatusRequest) ProtoMessage() {}
 
 func (x *ReportReplayStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[20]
+	mi := &file_hub_v1_hub_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1745,7 +1830,7 @@ func (x *ReportReplayStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportReplayStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportReplayStatusRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{20}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReportReplayStatusRequest) GetSpokeId() string {
@@ -1771,7 +1856,7 @@ type ReportReplayStatusResponse struct {
 
 func (x *ReportReplayStatusResponse) Reset() {
 	*x = ReportReplayStatusResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[21]
+	mi := &file_hub_v1_hub_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1783,7 +1868,7 @@ func (x *ReportReplayStatusResponse) String() string {
 func (*ReportReplayStatusResponse) ProtoMessage() {}
 
 func (x *ReportReplayStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[21]
+	mi := &file_hub_v1_hub_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1796,7 +1881,7 @@ func (x *ReportReplayStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportReplayStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportReplayStatusResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{21}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReportReplayStatusResponse) GetAcknowledged() bool {
@@ -1821,7 +1906,7 @@ type CaptureStatusSummary struct {
 
 func (x *CaptureStatusSummary) Reset() {
 	*x = CaptureStatusSummary{}
-	mi := &file_hub_v1_hub_proto_msgTypes[22]
+	mi := &file_hub_v1_hub_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1833,7 +1918,7 @@ func (x *CaptureStatusSummary) String() string {
 func (*CaptureStatusSummary) ProtoMessage() {}
 
 func (x *CaptureStatusSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[22]
+	mi := &file_hub_v1_hub_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1846,7 +1931,7 @@ func (x *CaptureStatusSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureStatusSummary.ProtoReflect.Descriptor instead.
 func (*CaptureStatusSummary) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{22}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CaptureStatusSummary) GetCaptureName() string {
@@ -1908,7 +1993,7 @@ type ReportCaptureStatusRequest struct {
 
 func (x *ReportCaptureStatusRequest) Reset() {
 	*x = ReportCaptureStatusRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[23]
+	mi := &file_hub_v1_hub_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1920,7 +2005,7 @@ func (x *ReportCaptureStatusRequest) String() string {
 func (*ReportCaptureStatusRequest) ProtoMessage() {}
 
 func (x *ReportCaptureStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[23]
+	mi := &file_hub_v1_hub_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1933,7 +2018,7 @@ func (x *ReportCaptureStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCaptureStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportCaptureStatusRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{23}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ReportCaptureStatusRequest) GetSpokeId() string {
@@ -1959,7 +2044,7 @@ type ReportCaptureStatusResponse struct {
 
 func (x *ReportCaptureStatusResponse) Reset() {
 	*x = ReportCaptureStatusResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[24]
+	mi := &file_hub_v1_hub_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1971,7 +2056,7 @@ func (x *ReportCaptureStatusResponse) String() string {
 func (*ReportCaptureStatusResponse) ProtoMessage() {}
 
 func (x *ReportCaptureStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[24]
+	mi := &file_hub_v1_hub_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1984,7 +2069,7 @@ func (x *ReportCaptureStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCaptureStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportCaptureStatusResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{24}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReportCaptureStatusResponse) GetAcknowledged() bool {
@@ -2008,7 +2093,7 @@ type ListCapturesRequest struct {
 
 func (x *ListCapturesRequest) Reset() {
 	*x = ListCapturesRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[25]
+	mi := &file_hub_v1_hub_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2020,7 +2105,7 @@ func (x *ListCapturesRequest) String() string {
 func (*ListCapturesRequest) ProtoMessage() {}
 
 func (x *ListCapturesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[25]
+	mi := &file_hub_v1_hub_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2033,7 +2118,7 @@ func (x *ListCapturesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapturesRequest.ProtoReflect.Descriptor instead.
 func (*ListCapturesRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{25}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ListCapturesRequest) GetSpokeId() string {
@@ -2072,7 +2157,7 @@ type CaptureInfo struct {
 
 func (x *CaptureInfo) Reset() {
 	*x = CaptureInfo{}
-	mi := &file_hub_v1_hub_proto_msgTypes[26]
+	mi := &file_hub_v1_hub_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2084,7 +2169,7 @@ func (x *CaptureInfo) String() string {
 func (*CaptureInfo) ProtoMessage() {}
 
 func (x *CaptureInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[26]
+	mi := &file_hub_v1_hub_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2097,7 +2182,7 @@ func (x *CaptureInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureInfo.ProtoReflect.Descriptor instead.
 func (*CaptureInfo) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{26}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CaptureInfo) GetCaptureName() string {
@@ -2158,7 +2243,7 @@ type ListCapturesResponse struct {
 
 func (x *ListCapturesResponse) Reset() {
 	*x = ListCapturesResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[27]
+	mi := &file_hub_v1_hub_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2170,7 +2255,7 @@ func (x *ListCapturesResponse) String() string {
 func (*ListCapturesResponse) ProtoMessage() {}
 
 func (x *ListCapturesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[27]
+	mi := &file_hub_v1_hub_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2183,7 +2268,7 @@ func (x *ListCapturesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapturesResponse.ProtoReflect.Descriptor instead.
 func (*ListCapturesResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{27}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ListCapturesResponse) GetCaptures() []*CaptureInfo {
@@ -2205,7 +2290,7 @@ type GetCaptureStatusRequest struct {
 
 func (x *GetCaptureStatusRequest) Reset() {
 	*x = GetCaptureStatusRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[28]
+	mi := &file_hub_v1_hub_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2217,7 +2302,7 @@ func (x *GetCaptureStatusRequest) String() string {
 func (*GetCaptureStatusRequest) ProtoMessage() {}
 
 func (x *GetCaptureStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[28]
+	mi := &file_hub_v1_hub_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2230,7 +2315,7 @@ func (x *GetCaptureStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCaptureStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetCaptureStatusRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{28}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GetCaptureStatusRequest) GetCaptureName() string {
@@ -2263,7 +2348,7 @@ type GetCaptureStatusResponse struct {
 
 func (x *GetCaptureStatusResponse) Reset() {
 	*x = GetCaptureStatusResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[29]
+	mi := &file_hub_v1_hub_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2275,7 +2360,7 @@ func (x *GetCaptureStatusResponse) String() string {
 func (*GetCaptureStatusResponse) ProtoMessage() {}
 
 func (x *GetCaptureStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[29]
+	mi := &file_hub_v1_hub_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2288,7 +2373,7 @@ func (x *GetCaptureStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCaptureStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetCaptureStatusResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{29}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetCaptureStatusResponse) GetCapture() *CaptureInfo {
@@ -2308,7 +2393,7 @@ type ListSpokesRequest struct {
 
 func (x *ListSpokesRequest) Reset() {
 	*x = ListSpokesRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[30]
+	mi := &file_hub_v1_hub_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2320,7 +2405,7 @@ func (x *ListSpokesRequest) String() string {
 func (*ListSpokesRequest) ProtoMessage() {}
 
 func (x *ListSpokesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[30]
+	mi := &file_hub_v1_hub_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2333,7 +2418,7 @@ func (x *ListSpokesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSpokesRequest.ProtoReflect.Descriptor instead.
 func (*ListSpokesRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{30}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ListSpokesRequest) GetCell() string {
@@ -2359,7 +2444,7 @@ type SpokeInfo struct {
 
 func (x *SpokeInfo) Reset() {
 	*x = SpokeInfo{}
-	mi := &file_hub_v1_hub_proto_msgTypes[31]
+	mi := &file_hub_v1_hub_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2371,7 +2456,7 @@ func (x *SpokeInfo) String() string {
 func (*SpokeInfo) ProtoMessage() {}
 
 func (x *SpokeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[31]
+	mi := &file_hub_v1_hub_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2384,7 +2469,7 @@ func (x *SpokeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpokeInfo.ProtoReflect.Descriptor instead.
 func (*SpokeInfo) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{31}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SpokeInfo) GetSpokeId() string {
@@ -2452,7 +2537,7 @@ type ListSpokesResponse struct {
 
 func (x *ListSpokesResponse) Reset() {
 	*x = ListSpokesResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[32]
+	mi := &file_hub_v1_hub_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2464,7 +2549,7 @@ func (x *ListSpokesResponse) String() string {
 func (*ListSpokesResponse) ProtoMessage() {}
 
 func (x *ListSpokesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[32]
+	mi := &file_hub_v1_hub_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2477,7 +2562,7 @@ func (x *ListSpokesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSpokesResponse.ProtoReflect.Descriptor instead.
 func (*ListSpokesResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{32}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListSpokesResponse) GetSpokes() []*SpokeInfo {
@@ -2495,7 +2580,7 @@ type ListCellsRequest struct {
 
 func (x *ListCellsRequest) Reset() {
 	*x = ListCellsRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[33]
+	mi := &file_hub_v1_hub_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2507,7 +2592,7 @@ func (x *ListCellsRequest) String() string {
 func (*ListCellsRequest) ProtoMessage() {}
 
 func (x *ListCellsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[33]
+	mi := &file_hub_v1_hub_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2520,7 +2605,7 @@ func (x *ListCellsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCellsRequest.ProtoReflect.Descriptor instead.
 func (*ListCellsRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{33}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{34}
 }
 
 // CellInfo aggregates the spokes registered under one cell.
@@ -2537,7 +2622,7 @@ type CellInfo struct {
 
 func (x *CellInfo) Reset() {
 	*x = CellInfo{}
-	mi := &file_hub_v1_hub_proto_msgTypes[34]
+	mi := &file_hub_v1_hub_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2549,7 +2634,7 @@ func (x *CellInfo) String() string {
 func (*CellInfo) ProtoMessage() {}
 
 func (x *CellInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[34]
+	mi := &file_hub_v1_hub_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2562,7 +2647,7 @@ func (x *CellInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CellInfo.ProtoReflect.Descriptor instead.
 func (*CellInfo) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{34}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *CellInfo) GetName() string {
@@ -2609,7 +2694,7 @@ type ListCellsResponse struct {
 
 func (x *ListCellsResponse) Reset() {
 	*x = ListCellsResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[35]
+	mi := &file_hub_v1_hub_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2621,7 +2706,7 @@ func (x *ListCellsResponse) String() string {
 func (*ListCellsResponse) ProtoMessage() {}
 
 func (x *ListCellsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[35]
+	mi := &file_hub_v1_hub_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2634,7 +2719,7 @@ func (x *ListCellsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCellsResponse.ProtoReflect.Descriptor instead.
 func (*ListCellsResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{35}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListCellsResponse) GetCells() []*CellInfo {
@@ -2657,7 +2742,7 @@ type ListReplaysRequest struct {
 
 func (x *ListReplaysRequest) Reset() {
 	*x = ListReplaysRequest{}
-	mi := &file_hub_v1_hub_proto_msgTypes[36]
+	mi := &file_hub_v1_hub_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2669,7 +2754,7 @@ func (x *ListReplaysRequest) String() string {
 func (*ListReplaysRequest) ProtoMessage() {}
 
 func (x *ListReplaysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[36]
+	mi := &file_hub_v1_hub_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2682,7 +2767,7 @@ func (x *ListReplaysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReplaysRequest.ProtoReflect.Descriptor instead.
 func (*ListReplaysRequest) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{36}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ListReplaysRequest) GetLoadTestName() string {
@@ -2718,7 +2803,7 @@ type ReplayInfo struct {
 
 func (x *ReplayInfo) Reset() {
 	*x = ReplayInfo{}
-	mi := &file_hub_v1_hub_proto_msgTypes[37]
+	mi := &file_hub_v1_hub_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2730,7 +2815,7 @@ func (x *ReplayInfo) String() string {
 func (*ReplayInfo) ProtoMessage() {}
 
 func (x *ReplayInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[37]
+	mi := &file_hub_v1_hub_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2743,7 +2828,7 @@ func (x *ReplayInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayInfo.ProtoReflect.Descriptor instead.
 func (*ReplayInfo) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{37}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ReplayInfo) GetSpokeId() string {
@@ -2776,7 +2861,7 @@ type ListReplaysResponse struct {
 
 func (x *ListReplaysResponse) Reset() {
 	*x = ListReplaysResponse{}
-	mi := &file_hub_v1_hub_proto_msgTypes[38]
+	mi := &file_hub_v1_hub_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2788,7 +2873,7 @@ func (x *ListReplaysResponse) String() string {
 func (*ListReplaysResponse) ProtoMessage() {}
 
 func (x *ListReplaysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_hub_v1_hub_proto_msgTypes[38]
+	mi := &file_hub_v1_hub_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2801,7 +2886,7 @@ func (x *ListReplaysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReplaysResponse.ProtoReflect.Descriptor instead.
 func (*ListReplaysResponse) Descriptor() ([]byte, []int) {
-	return file_hub_v1_hub_proto_rawDescGZIP(), []int{38}
+	return file_hub_v1_hub_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ListReplaysResponse) GetReplays() []*ReplayInfo {
@@ -2853,10 +2938,22 @@ var file_hub_v1_hub_proto_rawDesc = []byte{
 	0x04, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x68, 0x75, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x52,
 	0x65, 0x70, 0x6c, 0x61, 0x79, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x53, 0x75, 0x6d, 0x6d, 0x61,
 	0x72, 0x79, 0x52, 0x0f, 0x72, 0x65, 0x70, 0x6c, 0x61, 0x79, 0x53, 0x75, 0x6d, 0x6d, 0x61, 0x72,
-	0x69, 0x65, 0x73, 0x22, 0x37, 0x0a, 0x11, 0x48, 0x65, 0x61, 0x72, 0x74, 0x62, 0x65, 0x61, 0x74,
-	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x22, 0x0a, 0x0c, 0x61, 0x63, 0x6b, 0x6e,
-	0x6f, 0x77, 0x6c, 0x65, 0x64, 0x67, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0c,
-	0x61, 0x63, 0x6b, 0x6e, 0x6f, 0x77, 0x6c, 0x65, 0x64, 0x67, 0x65, 0x64, 0x22, 0x4b, 0x0a, 0x16,
+	0x69, 0x65, 0x73, 0x22, 0xb5, 0x01, 0x0a, 0x11, 0x48, 0x65, 0x61, 0x72, 0x74, 0x62, 0x65, 0x61,
+	0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x22, 0x0a, 0x0c, 0x61, 0x63, 0x6b,
+	0x6e, 0x6f, 0x77, 0x6c, 0x65, 0x64, 0x67, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52,
+	0x0c, 0x61, 0x63, 0x6b, 0x6e, 0x6f, 0x77, 0x6c, 0x65, 0x64, 0x67, 0x65, 0x64, 0x12, 0x3f, 0x0a,
+	0x11, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x74, 0x65, 0x73,
+	0x74, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x13, 0x2e, 0x68, 0x75, 0x62, 0x2e, 0x76,
+	0x31, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x54, 0x65, 0x73, 0x74, 0x4b, 0x65, 0x79, 0x52, 0x0f, 0x61,
+	0x63, 0x74, 0x69, 0x76, 0x65, 0x4c, 0x6f, 0x61, 0x64, 0x54, 0x65, 0x73, 0x74, 0x73, 0x12, 0x3b,
+	0x0a, 0x1a, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x74, 0x65,
+	0x73, 0x74, 0x73, 0x5f, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x18, 0x03, 0x20, 0x01,
+	0x28, 0x08, 0x52, 0x17, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x4c, 0x6f, 0x61, 0x64, 0x54, 0x65,
+	0x73, 0x74, 0x73, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x22, 0x3f, 0x0a, 0x0b, 0x4c,
+	0x6f, 0x61, 0x64, 0x54, 0x65, 0x73, 0x74, 0x4b, 0x65, 0x79, 0x12, 0x1c, 0x0a, 0x09, 0x6e, 0x61,
+	0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x6e,
+	0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x4b, 0x0a, 0x16,
 	0x44, 0x65, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x53, 0x70, 0x6f, 0x6b, 0x65, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x19, 0x0a, 0x08, 0x73, 0x70, 0x6f, 0x6b, 0x65, 0x5f,
 	0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x73, 0x70, 0x6f, 0x6b, 0x65, 0x49,
@@ -2995,11 +3092,13 @@ var file_hub_v1_hub_proto_rawDesc = []byte{
 	0x20, 0x01, 0x28, 0x05, 0x52, 0x11, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x73, 0x50, 0x65,
 	0x72, 0x53, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x74, 0x69, 0x6d, 0x65, 0x5f,
 	0x73, 0x63, 0x61, 0x6c, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x74, 0x69, 0x6d,
-	0x65, 0x53, 0x63, 0x61, 0x6c, 0x65, 0x22, 0x39, 0x0a, 0x0b, 0x52, 0x65, 0x70, 0x6c, 0x61, 0x79,
+	0x65, 0x53, 0x63, 0x61, 0x6c, 0x65, 0x22, 0x59, 0x0a, 0x0b, 0x52, 0x65, 0x70, 0x6c, 0x61, 0x79,
 	0x53, 0x68, 0x61, 0x72, 0x64, 0x12, 0x14, 0x0a, 0x05, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x18, 0x01,
 	0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x12, 0x14, 0x0a, 0x05, 0x63,
 	0x6f, 0x75, 0x6e, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x63, 0x6f, 0x75, 0x6e,
-	0x74, 0x22, 0xd6, 0x01, 0x0a, 0x11, 0x52, 0x65, 0x70, 0x6c, 0x61, 0x79, 0x44, 0x61, 0x74, 0x61,
+	0x74, 0x12, 0x1e, 0x0a, 0x0a, 0x70, 0x72, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x65, 0x64, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x70, 0x72, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x65,
+	0x64, 0x22, 0xd6, 0x01, 0x0a, 0x11, 0x52, 0x65, 0x70, 0x6c, 0x61, 0x79, 0x44, 0x61, 0x74, 0x61,
 	0x46, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x73, 0x12, 0x39, 0x0a, 0x0a, 0x73, 0x74, 0x61, 0x72, 0x74,
 	0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f,
 	0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69,
@@ -3313,7 +3412,7 @@ func file_hub_v1_hub_proto_rawDescGZIP() []byte {
 }
 
 var file_hub_v1_hub_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_hub_v1_hub_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_hub_v1_hub_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_hub_v1_hub_proto_goTypes = []any{
 	(DirectiveAction)(0),                // 0: hub.v1.DirectiveAction
 	(ReplayAction)(0),                   // 1: hub.v1.ReplayAction
@@ -3324,102 +3423,104 @@ var file_hub_v1_hub_proto_goTypes = []any{
 	(*RegisterSpokeResponse)(nil),       // 6: hub.v1.RegisterSpokeResponse
 	(*HeartbeatRequest)(nil),            // 7: hub.v1.HeartbeatRequest
 	(*HeartbeatResponse)(nil),           // 8: hub.v1.HeartbeatResponse
-	(*DeregisterSpokeRequest)(nil),      // 9: hub.v1.DeregisterSpokeRequest
-	(*DeregisterSpokeResponse)(nil),     // 10: hub.v1.DeregisterSpokeResponse
-	(*WatchDirectivesRequest)(nil),      // 11: hub.v1.WatchDirectivesRequest
-	(*WatchDirectivesResponse)(nil),     // 12: hub.v1.WatchDirectivesResponse
-	(*CaptureDirective)(nil),            // 13: hub.v1.CaptureDirective
-	(*CaptureSpec)(nil),                 // 14: hub.v1.CaptureSpec
-	(*CaptureSettings)(nil),             // 15: hub.v1.CaptureSettings
-	(*CaptureFilters)(nil),              // 16: hub.v1.CaptureFilters
-	(*HeaderMatch)(nil),                 // 17: hub.v1.HeaderMatch
-	(*AgentScaling)(nil),                // 18: hub.v1.AgentScaling
-	(*ReplayDirective)(nil),             // 19: hub.v1.ReplayDirective
-	(*ReplaySpec)(nil),                  // 20: hub.v1.ReplaySpec
-	(*ReplayRate)(nil),                  // 21: hub.v1.ReplayRate
-	(*ReplayShard)(nil),                 // 22: hub.v1.ReplayShard
-	(*ReplayDataFilters)(nil),           // 23: hub.v1.ReplayDataFilters
-	(*ReplayStatusSummary)(nil),         // 24: hub.v1.ReplayStatusSummary
-	(*ReportReplayStatusRequest)(nil),   // 25: hub.v1.ReportReplayStatusRequest
-	(*ReportReplayStatusResponse)(nil),  // 26: hub.v1.ReportReplayStatusResponse
-	(*CaptureStatusSummary)(nil),        // 27: hub.v1.CaptureStatusSummary
-	(*ReportCaptureStatusRequest)(nil),  // 28: hub.v1.ReportCaptureStatusRequest
-	(*ReportCaptureStatusResponse)(nil), // 29: hub.v1.ReportCaptureStatusResponse
-	(*ListCapturesRequest)(nil),         // 30: hub.v1.ListCapturesRequest
-	(*CaptureInfo)(nil),                 // 31: hub.v1.CaptureInfo
-	(*ListCapturesResponse)(nil),        // 32: hub.v1.ListCapturesResponse
-	(*GetCaptureStatusRequest)(nil),     // 33: hub.v1.GetCaptureStatusRequest
-	(*GetCaptureStatusResponse)(nil),    // 34: hub.v1.GetCaptureStatusResponse
-	(*ListSpokesRequest)(nil),           // 35: hub.v1.ListSpokesRequest
-	(*SpokeInfo)(nil),                   // 36: hub.v1.SpokeInfo
-	(*ListSpokesResponse)(nil),          // 37: hub.v1.ListSpokesResponse
-	(*ListCellsRequest)(nil),            // 38: hub.v1.ListCellsRequest
-	(*CellInfo)(nil),                    // 39: hub.v1.CellInfo
-	(*ListCellsResponse)(nil),           // 40: hub.v1.ListCellsResponse
-	(*ListReplaysRequest)(nil),          // 41: hub.v1.ListReplaysRequest
-	(*ReplayInfo)(nil),                  // 42: hub.v1.ReplayInfo
-	(*ListReplaysResponse)(nil),         // 43: hub.v1.ListReplaysResponse
-	(*timestamppb.Timestamp)(nil),       // 44: google.protobuf.Timestamp
+	(*LoadTestKey)(nil),                 // 9: hub.v1.LoadTestKey
+	(*DeregisterSpokeRequest)(nil),      // 10: hub.v1.DeregisterSpokeRequest
+	(*DeregisterSpokeResponse)(nil),     // 11: hub.v1.DeregisterSpokeResponse
+	(*WatchDirectivesRequest)(nil),      // 12: hub.v1.WatchDirectivesRequest
+	(*WatchDirectivesResponse)(nil),     // 13: hub.v1.WatchDirectivesResponse
+	(*CaptureDirective)(nil),            // 14: hub.v1.CaptureDirective
+	(*CaptureSpec)(nil),                 // 15: hub.v1.CaptureSpec
+	(*CaptureSettings)(nil),             // 16: hub.v1.CaptureSettings
+	(*CaptureFilters)(nil),              // 17: hub.v1.CaptureFilters
+	(*HeaderMatch)(nil),                 // 18: hub.v1.HeaderMatch
+	(*AgentScaling)(nil),                // 19: hub.v1.AgentScaling
+	(*ReplayDirective)(nil),             // 20: hub.v1.ReplayDirective
+	(*ReplaySpec)(nil),                  // 21: hub.v1.ReplaySpec
+	(*ReplayRate)(nil),                  // 22: hub.v1.ReplayRate
+	(*ReplayShard)(nil),                 // 23: hub.v1.ReplayShard
+	(*ReplayDataFilters)(nil),           // 24: hub.v1.ReplayDataFilters
+	(*ReplayStatusSummary)(nil),         // 25: hub.v1.ReplayStatusSummary
+	(*ReportReplayStatusRequest)(nil),   // 26: hub.v1.ReportReplayStatusRequest
+	(*ReportReplayStatusResponse)(nil),  // 27: hub.v1.ReportReplayStatusResponse
+	(*CaptureStatusSummary)(nil),        // 28: hub.v1.CaptureStatusSummary
+	(*ReportCaptureStatusRequest)(nil),  // 29: hub.v1.ReportCaptureStatusRequest
+	(*ReportCaptureStatusResponse)(nil), // 30: hub.v1.ReportCaptureStatusResponse
+	(*ListCapturesRequest)(nil),         // 31: hub.v1.ListCapturesRequest
+	(*CaptureInfo)(nil),                 // 32: hub.v1.CaptureInfo
+	(*ListCapturesResponse)(nil),        // 33: hub.v1.ListCapturesResponse
+	(*GetCaptureStatusRequest)(nil),     // 34: hub.v1.GetCaptureStatusRequest
+	(*GetCaptureStatusResponse)(nil),    // 35: hub.v1.GetCaptureStatusResponse
+	(*ListSpokesRequest)(nil),           // 36: hub.v1.ListSpokesRequest
+	(*SpokeInfo)(nil),                   // 37: hub.v1.SpokeInfo
+	(*ListSpokesResponse)(nil),          // 38: hub.v1.ListSpokesResponse
+	(*ListCellsRequest)(nil),            // 39: hub.v1.ListCellsRequest
+	(*CellInfo)(nil),                    // 40: hub.v1.CellInfo
+	(*ListCellsResponse)(nil),           // 41: hub.v1.ListCellsResponse
+	(*ListReplaysRequest)(nil),          // 42: hub.v1.ListReplaysRequest
+	(*ReplayInfo)(nil),                  // 43: hub.v1.ReplayInfo
+	(*ListReplaysResponse)(nil),         // 44: hub.v1.ListReplaysResponse
+	(*timestamppb.Timestamp)(nil),       // 45: google.protobuf.Timestamp
 }
 var file_hub_v1_hub_proto_depIdxs = []int32{
-	27, // 0: hub.v1.HeartbeatRequest.capture_summaries:type_name -> hub.v1.CaptureStatusSummary
-	24, // 1: hub.v1.HeartbeatRequest.replay_summaries:type_name -> hub.v1.ReplayStatusSummary
-	13, // 2: hub.v1.WatchDirectivesResponse.directive:type_name -> hub.v1.CaptureDirective
-	19, // 3: hub.v1.WatchDirectivesResponse.replay_directive:type_name -> hub.v1.ReplayDirective
-	0,  // 4: hub.v1.CaptureDirective.action:type_name -> hub.v1.DirectiveAction
-	14, // 5: hub.v1.CaptureDirective.spec:type_name -> hub.v1.CaptureSpec
-	15, // 6: hub.v1.CaptureSpec.capture_settings:type_name -> hub.v1.CaptureSettings
-	16, // 7: hub.v1.CaptureSpec.filters:type_name -> hub.v1.CaptureFilters
-	18, // 8: hub.v1.CaptureSpec.agent_scaling:type_name -> hub.v1.AgentScaling
-	17, // 9: hub.v1.CaptureFilters.headers:type_name -> hub.v1.HeaderMatch
-	1,  // 10: hub.v1.ReplayDirective.action:type_name -> hub.v1.ReplayAction
-	20, // 11: hub.v1.ReplayDirective.spec:type_name -> hub.v1.ReplaySpec
-	21, // 12: hub.v1.ReplaySpec.rate:type_name -> hub.v1.ReplayRate
-	22, // 13: hub.v1.ReplaySpec.shard:type_name -> hub.v1.ReplayShard
-	23, // 14: hub.v1.ReplaySpec.filters:type_name -> hub.v1.ReplayDataFilters
-	44, // 15: hub.v1.ReplayDataFilters.start_time:type_name -> google.protobuf.Timestamp
-	44, // 16: hub.v1.ReplayDataFilters.end_time:type_name -> google.protobuf.Timestamp
-	2,  // 17: hub.v1.ReplayStatusSummary.phase:type_name -> hub.v1.ReplayPhase
-	24, // 18: hub.v1.ReportReplayStatusRequest.statuses:type_name -> hub.v1.ReplayStatusSummary
-	3,  // 19: hub.v1.CaptureStatusSummary.phase:type_name -> hub.v1.CapturePhase
-	27, // 20: hub.v1.ReportCaptureStatusRequest.statuses:type_name -> hub.v1.CaptureStatusSummary
-	3,  // 21: hub.v1.CaptureInfo.phase:type_name -> hub.v1.CapturePhase
-	44, // 22: hub.v1.CaptureInfo.start_time:type_name -> google.protobuf.Timestamp
-	31, // 23: hub.v1.ListCapturesResponse.captures:type_name -> hub.v1.CaptureInfo
-	31, // 24: hub.v1.GetCaptureStatusResponse.capture:type_name -> hub.v1.CaptureInfo
-	44, // 25: hub.v1.SpokeInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
-	4,  // 26: hub.v1.SpokeInfo.state:type_name -> hub.v1.SpokeState
-	36, // 27: hub.v1.ListSpokesResponse.spokes:type_name -> hub.v1.SpokeInfo
-	39, // 28: hub.v1.ListCellsResponse.cells:type_name -> hub.v1.CellInfo
-	24, // 29: hub.v1.ReplayInfo.summary:type_name -> hub.v1.ReplayStatusSummary
-	42, // 30: hub.v1.ListReplaysResponse.replays:type_name -> hub.v1.ReplayInfo
-	5,  // 31: hub.v1.HubService.RegisterSpoke:input_type -> hub.v1.RegisterSpokeRequest
-	7,  // 32: hub.v1.HubService.Heartbeat:input_type -> hub.v1.HeartbeatRequest
-	9,  // 33: hub.v1.HubService.DeregisterSpoke:input_type -> hub.v1.DeregisterSpokeRequest
-	11, // 34: hub.v1.HubService.WatchDirectives:input_type -> hub.v1.WatchDirectivesRequest
-	28, // 35: hub.v1.HubService.ReportCaptureStatus:input_type -> hub.v1.ReportCaptureStatusRequest
-	25, // 36: hub.v1.HubService.ReportReplayStatus:input_type -> hub.v1.ReportReplayStatusRequest
-	30, // 37: hub.v1.HubService.ListCaptures:input_type -> hub.v1.ListCapturesRequest
-	33, // 38: hub.v1.HubService.GetCaptureStatus:input_type -> hub.v1.GetCaptureStatusRequest
-	35, // 39: hub.v1.HubService.ListSpokes:input_type -> hub.v1.ListSpokesRequest
-	38, // 40: hub.v1.HubService.ListCells:input_type -> hub.v1.ListCellsRequest
-	41, // 41: hub.v1.HubService.ListReplays:input_type -> hub.v1.ListReplaysRequest
-	6,  // 42: hub.v1.HubService.RegisterSpoke:output_type -> hub.v1.RegisterSpokeResponse
-	8,  // 43: hub.v1.HubService.Heartbeat:output_type -> hub.v1.HeartbeatResponse
-	10, // 44: hub.v1.HubService.DeregisterSpoke:output_type -> hub.v1.DeregisterSpokeResponse
-	12, // 45: hub.v1.HubService.WatchDirectives:output_type -> hub.v1.WatchDirectivesResponse
-	29, // 46: hub.v1.HubService.ReportCaptureStatus:output_type -> hub.v1.ReportCaptureStatusResponse
-	26, // 47: hub.v1.HubService.ReportReplayStatus:output_type -> hub.v1.ReportReplayStatusResponse
-	32, // 48: hub.v1.HubService.ListCaptures:output_type -> hub.v1.ListCapturesResponse
-	34, // 49: hub.v1.HubService.GetCaptureStatus:output_type -> hub.v1.GetCaptureStatusResponse
-	37, // 50: hub.v1.HubService.ListSpokes:output_type -> hub.v1.ListSpokesResponse
-	40, // 51: hub.v1.HubService.ListCells:output_type -> hub.v1.ListCellsResponse
-	43, // 52: hub.v1.HubService.ListReplays:output_type -> hub.v1.ListReplaysResponse
-	42, // [42:53] is the sub-list for method output_type
-	31, // [31:42] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	28, // 0: hub.v1.HeartbeatRequest.capture_summaries:type_name -> hub.v1.CaptureStatusSummary
+	25, // 1: hub.v1.HeartbeatRequest.replay_summaries:type_name -> hub.v1.ReplayStatusSummary
+	9,  // 2: hub.v1.HeartbeatResponse.active_load_tests:type_name -> hub.v1.LoadTestKey
+	14, // 3: hub.v1.WatchDirectivesResponse.directive:type_name -> hub.v1.CaptureDirective
+	20, // 4: hub.v1.WatchDirectivesResponse.replay_directive:type_name -> hub.v1.ReplayDirective
+	0,  // 5: hub.v1.CaptureDirective.action:type_name -> hub.v1.DirectiveAction
+	15, // 6: hub.v1.CaptureDirective.spec:type_name -> hub.v1.CaptureSpec
+	16, // 7: hub.v1.CaptureSpec.capture_settings:type_name -> hub.v1.CaptureSettings
+	17, // 8: hub.v1.CaptureSpec.filters:type_name -> hub.v1.CaptureFilters
+	19, // 9: hub.v1.CaptureSpec.agent_scaling:type_name -> hub.v1.AgentScaling
+	18, // 10: hub.v1.CaptureFilters.headers:type_name -> hub.v1.HeaderMatch
+	1,  // 11: hub.v1.ReplayDirective.action:type_name -> hub.v1.ReplayAction
+	21, // 12: hub.v1.ReplayDirective.spec:type_name -> hub.v1.ReplaySpec
+	22, // 13: hub.v1.ReplaySpec.rate:type_name -> hub.v1.ReplayRate
+	23, // 14: hub.v1.ReplaySpec.shard:type_name -> hub.v1.ReplayShard
+	24, // 15: hub.v1.ReplaySpec.filters:type_name -> hub.v1.ReplayDataFilters
+	45, // 16: hub.v1.ReplayDataFilters.start_time:type_name -> google.protobuf.Timestamp
+	45, // 17: hub.v1.ReplayDataFilters.end_time:type_name -> google.protobuf.Timestamp
+	2,  // 18: hub.v1.ReplayStatusSummary.phase:type_name -> hub.v1.ReplayPhase
+	25, // 19: hub.v1.ReportReplayStatusRequest.statuses:type_name -> hub.v1.ReplayStatusSummary
+	3,  // 20: hub.v1.CaptureStatusSummary.phase:type_name -> hub.v1.CapturePhase
+	28, // 21: hub.v1.ReportCaptureStatusRequest.statuses:type_name -> hub.v1.CaptureStatusSummary
+	3,  // 22: hub.v1.CaptureInfo.phase:type_name -> hub.v1.CapturePhase
+	45, // 23: hub.v1.CaptureInfo.start_time:type_name -> google.protobuf.Timestamp
+	32, // 24: hub.v1.ListCapturesResponse.captures:type_name -> hub.v1.CaptureInfo
+	32, // 25: hub.v1.GetCaptureStatusResponse.capture:type_name -> hub.v1.CaptureInfo
+	45, // 26: hub.v1.SpokeInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
+	4,  // 27: hub.v1.SpokeInfo.state:type_name -> hub.v1.SpokeState
+	37, // 28: hub.v1.ListSpokesResponse.spokes:type_name -> hub.v1.SpokeInfo
+	40, // 29: hub.v1.ListCellsResponse.cells:type_name -> hub.v1.CellInfo
+	25, // 30: hub.v1.ReplayInfo.summary:type_name -> hub.v1.ReplayStatusSummary
+	43, // 31: hub.v1.ListReplaysResponse.replays:type_name -> hub.v1.ReplayInfo
+	5,  // 32: hub.v1.HubService.RegisterSpoke:input_type -> hub.v1.RegisterSpokeRequest
+	7,  // 33: hub.v1.HubService.Heartbeat:input_type -> hub.v1.HeartbeatRequest
+	10, // 34: hub.v1.HubService.DeregisterSpoke:input_type -> hub.v1.DeregisterSpokeRequest
+	12, // 35: hub.v1.HubService.WatchDirectives:input_type -> hub.v1.WatchDirectivesRequest
+	29, // 36: hub.v1.HubService.ReportCaptureStatus:input_type -> hub.v1.ReportCaptureStatusRequest
+	26, // 37: hub.v1.HubService.ReportReplayStatus:input_type -> hub.v1.ReportReplayStatusRequest
+	31, // 38: hub.v1.HubService.ListCaptures:input_type -> hub.v1.ListCapturesRequest
+	34, // 39: hub.v1.HubService.GetCaptureStatus:input_type -> hub.v1.GetCaptureStatusRequest
+	36, // 40: hub.v1.HubService.ListSpokes:input_type -> hub.v1.ListSpokesRequest
+	39, // 41: hub.v1.HubService.ListCells:input_type -> hub.v1.ListCellsRequest
+	42, // 42: hub.v1.HubService.ListReplays:input_type -> hub.v1.ListReplaysRequest
+	6,  // 43: hub.v1.HubService.RegisterSpoke:output_type -> hub.v1.RegisterSpokeResponse
+	8,  // 44: hub.v1.HubService.Heartbeat:output_type -> hub.v1.HeartbeatResponse
+	11, // 45: hub.v1.HubService.DeregisterSpoke:output_type -> hub.v1.DeregisterSpokeResponse
+	13, // 46: hub.v1.HubService.WatchDirectives:output_type -> hub.v1.WatchDirectivesResponse
+	30, // 47: hub.v1.HubService.ReportCaptureStatus:output_type -> hub.v1.ReportCaptureStatusResponse
+	27, // 48: hub.v1.HubService.ReportReplayStatus:output_type -> hub.v1.ReportReplayStatusResponse
+	33, // 49: hub.v1.HubService.ListCaptures:output_type -> hub.v1.ListCapturesResponse
+	35, // 50: hub.v1.HubService.GetCaptureStatus:output_type -> hub.v1.GetCaptureStatusResponse
+	38, // 51: hub.v1.HubService.ListSpokes:output_type -> hub.v1.ListSpokesResponse
+	41, // 52: hub.v1.HubService.ListCells:output_type -> hub.v1.ListCellsResponse
+	44, // 53: hub.v1.HubService.ListReplays:output_type -> hub.v1.ListReplaysResponse
+	43, // [43:54] is the sub-list for method output_type
+	32, // [32:43] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_hub_v1_hub_proto_init() }
@@ -3433,7 +3534,7 @@ func file_hub_v1_hub_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_hub_v1_hub_proto_rawDesc,
 			NumEnums:      5,
-			NumMessages:   39,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

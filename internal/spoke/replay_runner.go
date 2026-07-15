@@ -99,13 +99,62 @@ func BuildReplayJob(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1.
 		}
 	}
 
+	// InitContainer-delivered engine plugins: when a plugin image is
+	// configured, plugins are installed into a shared emptyDir instead of
+	// being read from the replay-engine image, so plugin updates ship
+	// without rebuilding the worker image.
+	addPluginInstaller(job)
+
 	return job, nil
+}
+
+// addPluginInstaller wires the REPLAY_PLUGIN_IMAGE initContainer pattern:
+// the plugin image's /plugin-installer copies its /plugins into an
+// emptyDir that the worker mounts at its plugin directory.
+func addPluginInstaller(job *batchv1.Job) {
+	pluginImage := os.Getenv("REPLAY_PLUGIN_IMAGE")
+	if pluginImage == "" {
+		return
+	}
+	pluginDir := os.Getenv("REPLAY_PLUGIN_DIR")
+	if pluginDir == "" {
+		pluginDir = "/plugins"
+	}
+
+	const volumeName = "engine-plugins"
+	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
+		Name:         volumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	})
+	job.Spec.Template.Spec.InitContainers = append(job.Spec.Template.Spec.InitContainers, corev1.Container{
+		Name:    "install-engine-plugins",
+		Image:   pluginImage,
+		Command: []string{"/plugin-installer"},
+		Env: []corev1.EnvVar{
+			{Name: "PLUGIN_TARGET_DIR", Value: "/target"},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: volumeName, MountPath: "/target"},
+		},
+	})
+	job.Spec.Template.Spec.Containers[0].VolumeMounts = append(
+		job.Spec.Template.Spec.Containers[0].VolumeMounts,
+		corev1.VolumeMount{Name: volumeName, MountPath: pluginDir},
+	)
 }
 
 // buildReplayArgs translates the TrafficReplay spec into replay-engine flags.
 func buildReplayArgs(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1.CaptureStorage) ([]string, error) {
+	// Presharded captures: the worker reads only its own slice (written by
+	// kapture-preshard) and skips shard filtering entirely.
+	captureID := fmt.Sprintf("%s/%s", tr.Namespace, tr.Spec.SourceRef.Name)
+	presharded := tr.Spec.Shard != nil && tr.Spec.Shard.Presharded != nil && *tr.Spec.Shard.Presharded
+	if presharded {
+		captureID = fmt.Sprintf("%s/shards/%d-of-%d", captureID, tr.Spec.Shard.Index, tr.Spec.Shard.Count)
+	}
+
 	args := []string{
-		"--capture-id", fmt.Sprintf("%s/%s", tr.Namespace, tr.Spec.SourceRef.Name),
+		"--capture-id", captureID,
 		"--log-format", "json",
 	}
 
@@ -178,8 +227,9 @@ func buildReplayArgs(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1
 		args = append(args, "--concurrency", strconv.Itoa(int(*tr.Spec.Concurrency)))
 	}
 
-	// Sharding for distributed load tests.
-	if shard := tr.Spec.Shard; shard != nil {
+	// Sharding for distributed load tests. Presharded slices are already
+	// disjoint, so the hash filter is skipped for them.
+	if shard := tr.Spec.Shard; shard != nil && !presharded {
 		args = append(args,
 			"--shard-index", strconv.Itoa(int(shard.Index)),
 			"--shard-count", strconv.Itoa(int(shard.Count)))

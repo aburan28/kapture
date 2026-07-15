@@ -3,15 +3,21 @@ package hub
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc/credentials"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
+	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
 // CaptureHubReconciler reconciles the singleton CaptureHub CR.
@@ -21,9 +27,10 @@ type CaptureHubReconciler struct {
 	client.Client
 	Log logr.Logger
 
-	mu     sync.Mutex
-	server *Server
-	cancel context.CancelFunc
+	mu        sync.Mutex
+	server    *Server
+	cancel    context.CancelFunc
+	tlsSecret string // "namespace/name" of the TLS secret in use, "" = plaintext
 }
 
 // SetupWithManager registers the reconciler with the controller-runtime manager.
@@ -67,7 +74,8 @@ func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-// ensureServer starts or reconfigures the gRPC server.
+// ensureServer starts or reconfigures the gRPC server, with TLS/mTLS from
+// the CaptureHub spec's certificate secret when configured.
 func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1alpha1.CaptureHub) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -77,12 +85,20 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 		address = ":9443"
 	}
 
-	// If the server is already running on the right address, nothing to do.
-	if r.server != nil && r.server.address == address {
+	creds, tlsSecret, err := r.buildCredentials(ctx, hub)
+	if err != nil {
+		return err
+	}
+
+	// If the server is already running with the right address and TLS
+	// source, nothing to do. Certificate *rotation* within the same
+	// secret is not hot-reloaded yet; change the secret name to force a
+	// server restart.
+	if r.server != nil && r.server.address == address && r.tlsSecret == tlsSecret {
 		return nil
 	}
 
-	// Stop existing server if address changed.
+	// Stop existing server on reconfiguration.
 	if r.server != nil {
 		r.Log.Info("Stopping existing gRPC server for reconfiguration")
 		r.cancel()
@@ -91,8 +107,15 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 		r.cancel = nil
 	}
 
-	r.Log.Info("Starting gRPC server", "address", address)
-	r.server = NewServer(address)
+	if creds != nil {
+		r.Log.Info("Starting gRPC server with TLS", "address", address,
+			"secret", tlsSecret, "mTLS", hubRequiresMTLS(hub))
+		r.server = NewServerWithTLS(address, creds)
+	} else {
+		r.Log.Info("Starting gRPC server (plaintext)", "address", address)
+		r.server = NewServer(address)
+	}
+	r.tlsSecret = tlsSecret
 
 	serverCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
@@ -104,6 +127,49 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 	}()
 
 	return nil
+}
+
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+
+// buildCredentials loads TLS credentials from the CaptureHub's certificate
+// secret. Returns nil credentials for plaintext configurations.
+func (r *CaptureHubReconciler) buildCredentials(ctx context.Context, hub *capturev1alpha1.CaptureHub) (credentials.TransportCredentials, string, error) {
+	if hub.Spec.TLS == nil {
+		return nil, "", nil
+	}
+
+	ref := hub.Spec.TLS.CertSecretRef
+	namespace := hubSecretNamespace(ref)
+
+	var secret corev1.Secret
+	key := types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}
+	if err := r.Get(ctx, key, &secret); err != nil {
+		return nil, "", fmt.Errorf("load TLS secret %s: %w", key, err)
+	}
+
+	creds, err := BuildServerCredentials(secret.Data, hubRequiresMTLS(hub))
+	if err != nil {
+		return nil, "", fmt.Errorf("TLS secret %s: %w", key, err)
+	}
+	return creds, key.String(), nil
+}
+
+// hubSecretNamespace resolves the secret namespace for the cluster-scoped
+// CaptureHub: explicit ref namespace, else the hub controller's own
+// namespace (POD_NAMESPACE), else "default".
+func hubSecretNamespace(ref gwapiv1.SecretObjectReference) string {
+	if ref.Namespace != nil && *ref.Namespace != "" {
+		return string(*ref.Namespace)
+	}
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return "default"
+}
+
+func hubRequiresMTLS(hub *capturev1alpha1.CaptureHub) bool {
+	return hub.Spec.Authentication != nil &&
+		hub.Spec.Authentication.Type == capturev1alpha1.HubAuthenticationTypeMTLS
 }
 
 // stopServer gracefully stops the gRPC server.
@@ -127,6 +193,25 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 
 	if srv == nil {
 		return fmt.Errorf("gRPC server not running")
+	}
+
+	// Publish the authoritative load-test list for heartbeat responses so
+	// spokes can garbage-collect orphaned shards. A failed list keeps the
+	// previous value and marks it incomplete rather than telling spokes
+	// "nothing exists".
+	var loadTests capturev1alpha1.CaptureLoadTestList
+	if err := r.List(ctx, &loadTests); err != nil {
+		r.Log.Error(err, "failed to list CaptureLoadTests for heartbeat GC hints")
+		srv.SetActiveLoadTests(nil, false)
+	} else {
+		keys := make([]*hubv1.LoadTestKey, 0, len(loadTests.Items))
+		for i := range loadTests.Items {
+			keys = append(keys, &hubv1.LoadTestKey{
+				Namespace: loadTests.Items[i].Namespace,
+				Name:      loadTests.Items[i].Name,
+			})
+		}
+		srv.SetActiveLoadTests(keys, true)
 	}
 
 	hub.Status.ConnectedSpokes = srv.ConnectedSpokeCount()

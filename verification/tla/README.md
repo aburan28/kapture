@@ -64,17 +64,24 @@ connected spoke accepted it, holding the finalizer / the Aborted
 transition until then) is what the `AbortSound`/`FinalizeSound` action
 properties pin down.
 
-## Explicit modelling assumption
+## Explicit modelling assumptions
 
 Directives accepted into a spoke's buffer are eventually delivered: the
 buffer survives the modelled hub restart. In reality a hub crash in the
 window between queueing a STOP and the spoke's gRPC stream consuming it
-would lose the directive after the finalizer was already removed. Closing
-that window requires spoke-side delivery acknowledgements (or spoke-side
-garbage collection of shards for load tests the hub no longer knows), and
-is tracked as future work. Spoke crash/deregistration is likewise out of
-scope: a deregistered spoke's shards are bounded by the capture size and
-cannot be reached by any protocol.
+would lose the directive after the finalizer was already removed. That
+window is now closed by **spoke-side orphan GC**
+(`internal/spoke/orphan_gc.go`, the `OrphanGC` action in the model):
+heartbeat responses carry the hub's authoritative CaptureLoadTest list,
+and shards referencing a load test that no longer exists are deleted
+locally — so `CleanupAfterDelete` holds even if a queued STOP is lost
+after finalization. The STOP-delivery-before-finalize rule remains the
+primary mechanism (prompt cleanup); GC is the backstop (bounded by the
+heartbeat interval plus the GC minimum age).
+
+Spoke crash/deregistration remains out of scope for STOP delivery: a
+deregistered spoke's shards are bounded by the capture size, and the same
+orphan GC removes them when the spoke reconnects.
 
 ## Running
 

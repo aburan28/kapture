@@ -25,6 +25,13 @@ spec:
             - name: grpc
               containerPort: 9443
               protocol: TCP
+          env:
+            # Default namespace for CaptureHub spec.tls.certSecretRef
+            # lookups when the reference has no explicit namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           resources:
             {{- toYaml .Values.hub.resources | nindent 12 }}
           {{- if .Values.hub.tls.secretName }}

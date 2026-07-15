@@ -100,9 +100,14 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 
 	shardIndex := int32(0)
 	shardCount := int32(1)
+	var presharded *bool
 	if spec.Shard != nil {
 		shardIndex = spec.Shard.Index
 		shardCount = spec.Shard.Count
+		if spec.Shard.Presharded {
+			t := true
+			presharded = &t
+		}
 	}
 
 	replay := &capturev1alpha1.TrafficReplay{
@@ -121,8 +126,9 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 				Host: spec.TargetHost,
 			},
 			Shard: &capturev1alpha1.ReplayShardSpec{
-				Index: shardIndex,
-				Count: shardCount,
+				Index:      shardIndex,
+				Count:      shardCount,
+				Presharded: presharded,
 			},
 			LoadTestRef: &capturev1alpha1.LoadTestReference{Name: directive.LoadTestName},
 		},

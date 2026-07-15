@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"os"
 	"strings"
@@ -46,6 +47,12 @@ func main() {
 	flag.StringVar(&clusterID, "cluster-id", envOr("CLUSTER_ID", ""), "The cluster identifier for this spoke.")
 	flag.StringVar(&cell, "cell", envOr("CELL_NAME", ""), "The deployment cell this spoke registers under (optional).")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
+
+	tlsFiles := spoke.HubTLSFiles{}
+	flag.StringVar(&tlsFiles.CertFile, "hub-tls-cert", envOr("HUB_TLS_CERT_FILE", ""), "Client certificate for hub mTLS (PEM).")
+	flag.StringVar(&tlsFiles.KeyFile, "hub-tls-key", envOr("HUB_TLS_KEY_FILE", ""), "Client key for hub mTLS (PEM).")
+	flag.StringVar(&tlsFiles.CAFile, "hub-tls-ca", envOr("HUB_TLS_CA_FILE", ""), "CA bundle that signed the hub server certificate (PEM).")
+	flag.StringVar(&tlsFiles.ServerName, "hub-tls-server-name", envOr("HUB_TLS_SERVER_NAME", ""), "Expected hub server certificate name (defaults to the dial host).")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -82,11 +89,24 @@ func main() {
 			clusterID = spokeName
 		}
 
+		var hubTLS *tls.Config
+		if tlsFiles.Configured() {
+			var err error
+			hubTLS, err = spoke.BuildHubTLSConfig(tlsFiles)
+			if err != nil {
+				setupLog.Error(err, "invalid hub TLS configuration")
+				os.Exit(1)
+			}
+			setupLog.Info("hub connection will use TLS",
+				"clientCert", tlsFiles.CertFile != "", "ca", tlsFiles.CAFile != "")
+		}
+
 		hubClient = spoke.NewHubClient(spoke.HubClientConfig{
 			HubAddress: hubAddress,
 			SpokeName:  spokeName,
 			ClusterID:  clusterID,
 			Cell:       cell,
+			TLSConfig:  hubTLS,
 			Logger:     setupLog,
 		})
 
@@ -114,6 +134,17 @@ func main() {
 					)
 				}
 			}
+		}
+
+		// Garbage-collect shards whose CaptureLoadTest no longer exists
+		// on the hub — the backstop for STOP directives lost in a hub
+		// crash window (see verification/tla/KaptureLoadTest.tla).
+		orphanGC := &spoke.OrphanShardGC{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("orphan-gc"),
+		}
+		hubClient.OnActiveLoadTests = func(ctx context.Context, keys []*hubv1.LoadTestKey) {
+			orphanGC.Collect(ctx, keys)
 		}
 
 		// Include replay shard statuses in heartbeats so the hub's load

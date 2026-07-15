@@ -251,11 +251,25 @@ Report(sh) ==
     /\ UNCHANGED <<assign, phase, buf, shardState, aborting, deleted,
                    finalized, stopDelivered, hubRestarts>>
 
+(* Orphan GC (internal/spoke/orphan_gc.go): heartbeat responses carry the *)
+(* hub's authoritative CaptureLoadTest list; once the load test is gone   *)
+(* (finalizer removed), the spoke deletes any shard that still references *)
+(* it — even if a queued STOP was lost. This is the backstop that closes  *)
+(* the lost-STOP window: CleanupAfterDelete holds through it without      *)
+(* assuming queued directives survive a hub crash.                        *)
+OrphanGC(sp) ==
+    /\ finalized
+    /\ \E sh \in Shards : assign[sh] = sp /\ shardState[sh] # "None"
+    /\ shardState' = [sh \in Shards |->
+                         IF assign[sh] = sp THEN "None" ELSE shardState[sh]]
+    /\ UNCHANGED <<assign, phase, buf, hubView, aborting, deleted,
+                   finalized, stopDelivered, hubRestarts>>
+
 -----------------------------------------------------------------------------
 
 Next ==
     \/ \E sh \in Shards : SendStart(sh) \/ ShardTerminate(sh) \/ Report(sh)
-    \/ \E sp \in Spokes : DeliverDirective(sp) \/ QueueStop(sp)
+    \/ \E sp \in Spokes : DeliverDirective(sp) \/ QueueStop(sp) \/ OrphanGC(sp)
     \/ AggRunning \/ AggCompleted \/ AggFailed
     \/ TriggerAbort \/ EnterAborted
     \/ RequestDelete \/ Finalize
@@ -267,6 +281,7 @@ Next ==
 Fairness ==
     /\ \A sp \in Spokes : WF_vars(DeliverDirective(sp))
     /\ \A sp \in Spokes : SF_vars(QueueStop(sp))
+    /\ \A sp \in Spokes : WF_vars(OrphanGC(sp))
     /\ \A sh \in Shards : SF_vars(SendStart(sh))
     /\ \A sh \in Shards : WF_vars(ShardTerminate(sh))
     /\ \A sh \in Shards : WF_vars(Report(sh))

@@ -30,6 +30,10 @@ spec:
             - name: REPLAY_PLUGIN_DIR
               value: {{ .Values.replayEngine.pluginDir | quote }}
             {{- end }}
+            {{- if .Values.replayEngine.pluginImage }}
+            - name: REPLAY_PLUGIN_IMAGE
+              value: {{ .Values.replayEngine.pluginImage | quote }}
+            {{- end }}
             {{- if .Values.spoke.hub.address }}
             - name: HUB_ADDRESS
               value: {{ .Values.spoke.hub.address | quote }}
@@ -37,6 +41,18 @@ spec:
             {{- if .Values.spoke.cell }}
             - name: CELL_NAME
               value: {{ .Values.spoke.cell | quote }}
+            {{- end }}
+            {{- if .Values.spoke.hub.tls.secretName }}
+            - name: HUB_TLS_CERT_FILE
+              value: /etc/kapture/hub-tls/tls.crt
+            - name: HUB_TLS_KEY_FILE
+              value: /etc/kapture/hub-tls/tls.key
+            - name: HUB_TLS_CA_FILE
+              value: /etc/kapture/hub-tls/ca.crt
+            {{- if .Values.spoke.hub.tls.serverName }}
+            - name: HUB_TLS_SERVER_NAME
+              value: {{ .Values.spoke.hub.tls.serverName | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.history.enabled }}
             {{- if .Values.history.localPostgres.enabled }}
@@ -54,6 +70,18 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.spoke.resources | nindent 12 }}
+          {{- if .Values.spoke.hub.tls.secretName }}
+          volumeMounts:
+            - name: hub-tls
+              mountPath: /etc/kapture/hub-tls
+              readOnly: true
+          {{- end }}
+      {{- if .Values.spoke.hub.tls.secretName }}
+      volumes:
+        - name: hub-tls
+          secret:
+            secretName: {{ .Values.spoke.hub.tls.secretName }}
+      {{- end }}
       {{- with .Values.spoke.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

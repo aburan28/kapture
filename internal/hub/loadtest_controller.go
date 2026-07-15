@@ -289,11 +289,14 @@ func (r *CaptureLoadTestReconciler) planDistribution(srv *Server, lt *capturev1a
 func (r *CaptureLoadTestReconciler) buildStartDirective(lt *capturev1alpha1.CaptureLoadTest, shard int32) *hubv1.ReplayDirective {
 	totalShards := lt.Status.TotalShards
 
+	presharded := lt.Spec.Distribution != nil &&
+		lt.Spec.Distribution.Presharded != nil && *lt.Spec.Distribution.Presharded
+
 	spec := &hubv1.ReplaySpec{
 		SourceCapture:  lt.Spec.SourceRef.Name,
 		StorageRefName: string(lt.Spec.StorageRef.Name),
 		TargetHost:     lt.Spec.Target.Host,
-		Shard:          &hubv1.ReplayShard{Index: shard, Count: totalShards},
+		Shard:          &hubv1.ReplayShard{Index: shard, Count: totalShards, Presharded: presharded},
 		Concurrency:    defaultConcurrencyPerWorker,
 	}
 	if lt.Spec.Target.Port != nil {

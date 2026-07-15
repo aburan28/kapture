@@ -58,6 +58,20 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   bool acknowledged = 1;
+  // Authoritative list of CaptureLoadTests currently known to the hub
+  // (from its CR store). Spokes garbage-collect local replay shards whose
+  // load test no longer exists — the backstop for STOP directives lost in
+  // a hub crash window. Only meaningful when active_load_tests_complete
+  // is true; an incomplete list (hub cache still syncing) must not
+  // trigger GC.
+  repeated LoadTestKey active_load_tests = 2;
+  bool active_load_tests_complete = 3;
+}
+
+// LoadTestKey identifies a CaptureLoadTest.
+message LoadTestKey {
+  string namespace = 1;
+  string name = 2;
 }
 
 message DeregisterSpokeRequest {
@@ -190,6 +204,9 @@ message ReplayRate {
 message ReplayShard {
   int32 index = 1;
   int32 count = 2;
+  // Presharded: the capture was pre-partitioned into per-shard slices
+  // (kapture-preshard); workers read only their slice with no filtering.
+  bool presharded = 3;
 }
 
 message ReplayDataFilters {

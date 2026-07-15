@@ -165,8 +165,18 @@ shard TrafficReplays; the Job runner turns it into
 | `k6` | HTTP | host-paced via feed | aggregate (summary export) | VUs pull from the adapter's local feed endpoint (`/next`, `/batch`); requires the `k6` binary |
 | `ghz` | gRPC | self-paced (`Constant`/`Unlimited` only) | aggregate (JSON report) | replays the captured **method mix** with representative payloads, not byte-exact sequences; uses server reflection or a `protoset` |
 
-Build them with `make build-engines` and place the binaries in the plugin
-directory (`replayEngine.pluginDir`).
+Build them with `make build-engines`. Distribution options:
+
+1. **Baked in (default):** the `replay-engine` image ships the three OOTB
+   plugins at `/plugins` plus the `k6` and `ghz` tool binaries — set
+   `replayEngine.pluginDir=/plugins` and everything works out of the box.
+2. **InitContainer delivery:** set `replayEngine.pluginImage` to any image
+   that satisfies the installer contract (`/plugin-installer` entrypoint
+   copying `/plugins` → `$PLUGIN_TARGET_DIR`; the replay-engine image
+   itself qualifies). Replay Jobs then get an initContainer that installs
+   plugins into a shared emptyDir, so plugin updates ship without
+   rebuilding the worker image. Installs are atomic (temp file + rename),
+   which is what makes them safe to hot-reload.
 
 ## Conformance checklist for engine authors
 

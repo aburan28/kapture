@@ -159,6 +159,8 @@ E2E pipeline in `.github/workflows/e2e.yaml` deploys to a Kind cluster.
 | `internal/hub/loadtest_controller.go` | CaptureLoadTest coordinator (shard fan-out across cells) |
 | `internal/storage/interface.go` | Storage Writer interface definition |
 | `internal/storage/factory.go` | Storage backend factory |
+| `internal/dataset/preshard.go` | Pre-shards captures into per-worker slices (via `cmd/kapture-preshard`) |
+| `internal/spoke/orphan_gc.go` | Deletes shards whose CaptureLoadTest vanished (lost-STOP backstop) |
 | `proto/replayengine/v1/replayengine.proto` | Replay engine ABI wire contract |
 | `pkg/replayengine/` | Engine plugin SDK (implement Engine, call Serve) |
 | `internal/replayengine/` | Engine host: subprocess launch, hot reload, streaming feeder |

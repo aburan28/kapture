@@ -27,6 +27,8 @@ build-engines:
 	go build -o bin/kapture-engine-builtin ./cmd/engines/builtin
 	go build -o bin/kapture-engine-k6 ./cmd/engines/k6
 	go build -o bin/kapture-engine-ghz ./cmd/engines/ghz
+	go build -o bin/kapture-preshard ./cmd/kapture-preshard
+	go build -o bin/plugin-installer ./cmd/plugin-installer
 
 test:
 	go test ./...

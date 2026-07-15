@@ -43,6 +43,11 @@ type HubClient struct {
 	// in each heartbeat. This keeps the hub's load test view fresh even if
 	// individual ReportReplayStatus calls were lost.
 	ReplaySummaries func(ctx context.Context) []*hubv1.ReplayStatusSummary
+
+	// OnActiveLoadTests receives the hub's authoritative CaptureLoadTest
+	// list from each heartbeat response. Called only when the hub marked
+	// the list complete.
+	OnActiveLoadTests func(ctx context.Context, keys []*hubv1.LoadTestKey)
 }
 
 // HubClientConfig holds configuration for the HubClient.
@@ -176,12 +181,17 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 		req.ReplaySummaries = c.ReplaySummaries(ctx)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	if _, err := client.Heartbeat(ctx, req); err != nil {
+	resp, err := client.Heartbeat(rpcCtx, req)
+	if err != nil {
 		c.log.Error(err, "heartbeat failed")
 		return
+	}
+
+	if resp.ActiveLoadTestsComplete && c.OnActiveLoadTests != nil {
+		c.OnActiveLoadTests(ctx, resp.ActiveLoadTests)
 	}
 }
 

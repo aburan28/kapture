@@ -99,6 +99,14 @@ type ReplayShardSpec struct {
 	// Count is the total number of shards the capture is split into.
 	// +kubebuilder:validation:Minimum=1
 	Count int32 `json:"count"`
+
+	// Presharded indicates the capture was pre-partitioned with
+	// kapture-preshard into per-shard slices. The worker then reads only
+	// the slice "{captureID}/shards/{index}-of-{count}" with no shard
+	// filtering, cutting storage reads by a factor of count. The slice
+	// layout for the same count must exist, or the replay reads nothing.
+	// +optional
+	Presharded *bool `json:"presharded,omitempty"`
 }
 
 // LoadTestReference identifies the CaptureLoadTest a replay shard belongs to.

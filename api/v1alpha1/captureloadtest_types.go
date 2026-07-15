@@ -54,6 +54,15 @@ type LoadTestDistribution struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=10
 	ConcurrencyPerWorker *int32 `json:"concurrencyPerWorker,omitempty"`
+
+	// Presharded indicates the source capture was pre-partitioned with
+	// kapture-preshard into exactly totalShards slices (participating
+	// spokes × workersPerSpoke). Each worker then reads only its own
+	// slice, cutting aggregate storage reads by a factor of the shard
+	// count. Combine with maxSpokes to pin the shard count to the
+	// presharded layout.
+	// +optional
+	Presharded *bool `json:"presharded,omitempty"`
 }
 
 // LoadTestAbortPolicy defines conditions under which the hub aborts an

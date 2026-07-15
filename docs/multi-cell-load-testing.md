@@ -190,6 +190,12 @@ heartbeats repopulate them within one interval, and the recorded
 `status.assignments` on the CaptureLoadTest let the coordinator re-send
 directives idempotently.
 
+Heartbeat responses also carry the hub's authoritative CaptureLoadTest
+list: spokes garbage-collect local shards whose load test no longer exists
+(`internal/spoke/orphan_gc.go`), so even a STOP directive lost in a hub
+crash window cannot leave orphaned load generators running. This is the
+`OrphanGC` action in the TLA+ model.
+
 ## Verification
 
 Two layers of machine-checked verification back the sharding and
@@ -218,10 +224,70 @@ coordination claims above:
 - One replay worker (shard) with `concurrencyPerWorker: 50` sustains roughly
   1-5k RPS for small-body HTTP traffic, dominated by target latency; use
   `workersPerSpoke` to add parallel readers on large spokes.
-- Every worker streams and decompresses the **full** capture and skips
-  requests owned by other shards, so worker count multiplies storage read
-  bandwidth: budget `shards × compressed-capture-size` of object-store
-  egress per run. The dataset/bundle format in the design doc removes this
-  cost later.
+- By default every worker streams and decompresses the **full** capture
+  and skips requests owned by other shards, so worker count multiplies
+  storage read bandwidth: budget `shards × compressed-capture-size` of
+  object-store egress per run. **Preshard large captures to remove this
+  cost** (next section).
 - Prefer more spokes over more workers per spoke when the target is remote:
   cells spread source load and avoid a single egress bottleneck.
+
+## Pre-sharded captures
+
+For large captures, run `kapture-preshard` once before the load test to
+re-partition the capture into per-shard slices using the same FNV-1a
+assignment the runtime filter uses:
+
+```bash
+# ships at /kapture-preshard in the replay-engine image; run as a Job
+kapture-preshard \
+  --storage-type s3 --bucket my-captures --region us-east-1 \
+  --capture-id prod/orders --shards 32
+```
+
+This writes `{captureID}/shards/{i}-of-{n}/...` slices in the standard
+capture layout (single streaming pass, any storage backend). Then set:
+
+```yaml
+spec:
+  distribution:
+    presharded: true      # workers read only their own slice
+    maxSpokes: 8
+    workersPerSpoke: 4    # spokes × workers must equal --shards (32)
+```
+
+Each worker now reads `1/n` of the capture with no hash filtering —
+aggregate storage egress drops from `n × capture-size` to `1 ×
+capture-size`. The slice/filter equivalence (a request lands in slice `i`
+iff the runtime filter would keep it on shard `i`) is enforced by both
+using `replay.ShardOwns`, and covered by a round-trip test through real
+storage writers and readers.
+
+## Securing the hub-spoke channel (mTLS)
+
+The hub gRPC server takes its certificates from the CaptureHub CR:
+
+```yaml
+apiVersion: capture.gateway.io/v1alpha1
+kind: CaptureHub
+metadata:
+  name: global-hub
+spec:
+  grpcAddress: ":9443"
+  tls:
+    certSecretRef:
+      name: hub-tls          # tls.crt/tls.key + ca.crt (client CA)
+  authentication:
+    type: mTLS               # spokes must present certs signed by ca.crt
+```
+
+Spokes mount their client certificate secret via Helm:
+
+```bash
+--set spoke.hub.tls.secretName=spoke-hub-tls \
+--set spoke.hub.tls.serverName=kapture-hub.capture-system.svc
+```
+
+Without `authentication.type: mTLS` the hub serves TLS without requiring
+client certificates. Certificate rotation currently requires changing the
+secret name (or restarting the hub); in-place rotation is future work.

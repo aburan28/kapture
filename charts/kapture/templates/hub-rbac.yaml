@@ -27,6 +27,10 @@ rules:
   - apiGroups: ["capture.gateway.io"]
     resources: ["captureloadtests/finalizers"]
     verbs: ["update"]
+  # TLS certificate secrets referenced by CaptureHub spec.tls.certSecretRef.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
