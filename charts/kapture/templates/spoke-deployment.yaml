@@ -26,6 +26,10 @@ spec:
               value: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
             - name: REPLAY_ENGINE_IMAGE
               value: "{{ .Values.replayEngine.image.repository }}:{{ .Values.replayEngine.image.tag }}"
+            {{- if .Values.replayEngine.pluginDir }}
+            - name: REPLAY_PLUGIN_DIR
+              value: {{ .Values.replayEngine.pluginDir | quote }}
+            {{- end }}
             {{- if .Values.spoke.hub.address }}
             - name: HUB_ADDRESS
               value: {{ .Values.spoke.hub.address | quote }}

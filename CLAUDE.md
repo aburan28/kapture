@@ -35,7 +35,12 @@ internal/
   spoke/               # Spoke controller, mirror injection, agent deployer, hub client
   agent/               # HTTP/gRPC capture handler, buffered writer, server
   storage/             # Storage backends (s3, gcs, efs, ebs, plugin) + factory
-proto/hub/v1/          # Protobuf definitions and generated gRPC stubs
+  replayengine/        # Engine plugin host: subprocess launch, hot reload, streaming feeder
+  engines/             # OOTB engine implementations (builtin, k6, ghz)
+pkg/replayengine/      # Public SDK for replay engine plugin authors (Serve + ABI)
+cmd/engines/           # Plugin binaries: kapture-engine-{builtin,k6,ghz}
+proto/hub/v1/          # Hub-spoke protobuf definitions and generated gRPC stubs
+proto/replayengine/v1/ # Replay engine ABI (see docs/replay-engine-abi.md)
 config/crd/bases/      # Generated CRD YAML manifests
 charts/kapture/        # Helm chart (templates, values, CRDs, unit tests)
 test/
@@ -154,6 +159,10 @@ E2E pipeline in `.github/workflows/e2e.yaml` deploys to a Kind cluster.
 | `internal/hub/loadtest_controller.go` | CaptureLoadTest coordinator (shard fan-out across cells) |
 | `internal/storage/interface.go` | Storage Writer interface definition |
 | `internal/storage/factory.go` | Storage backend factory |
+| `proto/replayengine/v1/replayengine.proto` | Replay engine ABI wire contract |
+| `pkg/replayengine/` | Engine plugin SDK (implement Engine, call Serve) |
+| `internal/replayengine/` | Engine host: subprocess launch, hot reload, streaming feeder |
+| `docs/replay-engine-abi.md` | Full ABI spec: handshake, versioning, conformance |
 | `charts/kapture/values.yaml` | Helm chart default values |
 | `config/crd/bases/*.yaml` | Generated CRD manifests - regenerate after API changes |
 

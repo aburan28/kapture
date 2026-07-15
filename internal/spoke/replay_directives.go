@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -138,6 +139,14 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 	if spec.Concurrency > 0 {
 		concurrency := spec.Concurrency
 		replay.Spec.Concurrency = &concurrency
+	}
+
+	if spec.EngineName != "" || len(spec.EngineConfigJson) > 0 {
+		engine := &capturev1alpha1.ReplayEngineSpec{Name: spec.EngineName}
+		if len(spec.EngineConfigJson) > 0 {
+			engine.Config = &runtime.RawExtension{Raw: spec.EngineConfigJson}
+		}
+		replay.Spec.Engine = engine
 	}
 
 	if rate := spec.Rate; rate != nil {

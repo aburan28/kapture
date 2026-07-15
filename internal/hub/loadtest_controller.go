@@ -306,6 +306,13 @@ func (r *CaptureLoadTestReconciler) buildStartDirective(lt *capturev1alpha1.Capt
 		spec.Concurrency = *dist.ConcurrencyPerWorker
 	}
 
+	if engine := lt.Spec.Engine; engine != nil {
+		spec.EngineName = engine.Name
+		if engine.Config != nil {
+			spec.EngineConfigJson = engine.Config.Raw
+		}
+	}
+
 	if rate := lt.Spec.Rate; rate != nil {
 		protoRate := &hubv1.ReplayRate{Mode: string(rate.Mode)}
 		if rate.Mode == capturev1alpha1.ReplayRateModeConstant && rate.RequestsPerSecond != nil {

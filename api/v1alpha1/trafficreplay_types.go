@@ -106,6 +106,23 @@ type LoadTestReference struct {
 	Name string `json:"name"`
 }
 
+// ReplayEngineSpec selects and configures the replay engine that sends the
+// load. Engines other than "builtin" run as gRPC subprocess plugins
+// discovered from the replay worker's plugin directory
+// (kapture-engine-<name>); see docs/replay-engine-abi.md.
+type ReplayEngineSpec struct {
+	// Name of the engine: "builtin" (native HTTP sender, default), "k6",
+	// "ghz", or any installed plugin name.
+	// +optional
+	// +kubebuilder:default=builtin
+	Name string `json:"name,omitempty"`
+
+	// Config is engine-specific configuration, passed verbatim (JSON) to
+	// the engine's Configure call.
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
+}
+
 // ReplayTransformRef references a named transformer plugin.
 type ReplayTransformRef struct {
 	// Name is the registered transformer plugin name (e.g., "header-rewriter").
@@ -155,6 +172,10 @@ type TrafficReplaySpec struct {
 	// directive; user-created replays leave it unset.
 	// +optional
 	LoadTestRef *LoadTestReference `json:"loadTestRef,omitempty"`
+
+	// Engine selects the replay engine. Defaults to the builtin sender.
+	// +optional
+	Engine *ReplayEngineSpec `json:"engine,omitempty"`
 }
 
 // TrafficReplayStatus defines the observed state of TrafficReplay.

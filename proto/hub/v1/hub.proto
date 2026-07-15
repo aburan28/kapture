@@ -167,6 +167,11 @@ message ReplaySpec {
   // Number of parallel senders within the replay worker.
   int32 concurrency = 8;
   ReplayDataFilters filters = 9;
+  // Replay engine name ("builtin", "k6", "ghz", or an installed plugin).
+  // Empty means builtin.
+  string engine_name = 10;
+  // Engine-specific configuration (JSON), passed through verbatim.
+  bytes engine_config_json = 11;
 }
 
 message ReplayRate {

@@ -2,6 +2,7 @@ package spoke
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,7 @@ func BuildReplayJob(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1.
 							Name:      "replay-engine",
 							Image:     ReplayEngineImage,
 							Args:      args,
+							Env:       replayEnv(),
 							Resources: replayResources(),
 						},
 					},
@@ -183,6 +185,15 @@ func buildReplayArgs(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1
 			"--shard-count", strconv.Itoa(int(shard.Count)))
 	}
 
+	// Engine selection: non-builtin engines run as plugin subprocesses
+	// discovered from the worker's plugin directory.
+	if engine := tr.Spec.Engine; engine != nil && engine.Name != "" && engine.Name != "builtin" {
+		args = append(args, "--engine", engine.Name)
+		if engine.Config != nil && len(engine.Config.Raw) > 0 {
+			args = append(args, "--engine-config", string(engine.Config.Raw))
+		}
+	}
+
 	// Data filters.
 	if f := tr.Spec.Filters; f != nil {
 		if f.StartTime != nil {
@@ -224,6 +235,16 @@ func mountCaptureVolume(job *batchv1.Job, mountPath string) {
 		job.Spec.Template.Spec.Containers[0].VolumeMounts,
 		corev1.VolumeMount{Name: volumeName, MountPath: mountPath, ReadOnly: true},
 	)
+}
+
+// replayEnv passes the spoke's plugin directory configuration through to
+// replay worker pods so external engines resolve their plugins from the
+// same location.
+func replayEnv() []corev1.EnvVar {
+	if dir := os.Getenv("REPLAY_PLUGIN_DIR"); dir != "" {
+		return []corev1.EnvVar{{Name: "REPLAY_PLUGIN_DIR", Value: dir}}
+	}
+	return nil
 }
 
 func replayResources() corev1.ResourceRequirements {

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.5
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: captureloadtests.capture.gateway.io
 spec:
   group: capture.gateway.io
@@ -122,6 +122,24 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                type: object
+              engine:
+                description: |-
+                  Engine selects the replay engine every shard runs (builtin, k6,
+                  ghz, or an installed plugin). Defaults to the builtin sender.
+                properties:
+                  config:
+                    description: |-
+                      Config is engine-specific configuration, passed verbatim (JSON) to
+                      the engine's Configure call.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  name:
+                    default: builtin
+                    description: |-
+                      Name of the engine: "builtin" (native HTTP sender, default), "k6",
+                      "ghz", or any installed plugin name.
+                    type: string
                 type: object
               filters:
                 description: |-

@@ -110,6 +110,18 @@ Rate behaviour per mode:
   QPS — including bursts. `timeScale` speeds up or slows down every shard.
 - **Unlimited**: every shard sends as fast as the target accepts.
 
+### Replay engines
+
+Each shard runs a replay engine. The default `builtin` engine is the
+native byte-exact HTTP sender; `spec.engine` selects an alternative that
+runs as a gRPC subprocess plugin on the replay worker — `k6` and `ghz`
+ship out of the box, and any binary implementing the engine ABI plugs in
+the same way (including hot reload of plugin binaries without restarting
+workers). Engines receive an already-sharded, already-paced request
+stream; they never touch storage. See
+[replay-engine-abi.md](replay-engine-abi.md) for the contract, the OOTB
+engine matrix, and packaging.
+
 ### On the spoke
 
 Each START directive is materialised as a `TrafficReplay` resource named

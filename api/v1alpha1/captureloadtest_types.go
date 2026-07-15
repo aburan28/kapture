@@ -112,6 +112,11 @@ type CaptureLoadTestSpec struct {
 	// Abort defines in-flight safety limits.
 	// +optional
 	Abort *LoadTestAbortPolicy `json:"abort,omitempty"`
+
+	// Engine selects the replay engine every shard runs (builtin, k6,
+	// ghz, or an installed plugin). Defaults to the builtin sender.
+	// +optional
+	Engine *ReplayEngineSpec `json:"engine,omitempty"`
 }
 
 // LoadTestCellStatus aggregates progress for one cell.

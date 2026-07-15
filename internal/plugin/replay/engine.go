@@ -209,6 +209,18 @@ func shardOf(requestID string, shardCount uint64) uint64 {
 	return h.Sum64() % shardCount
 }
 
+// ShardOwns reports whether the shard with the given index owns a request
+// ID under an n-way split. It is the single sharding function of the
+// replay data plane: every component that partitions a capture (this
+// engine, the external-engine feeder) must use it so shards stay disjoint
+// and exhaustive. Count <= 1 means no sharding.
+func ShardOwns(requestID string, index, count int) bool {
+	if count <= 1 {
+		return true
+	}
+	return shardOf(requestID, uint64(count)) == uint64(index)
+}
+
 func (e *Engine) readLoop(ctx context.Context, out chan<- *storage.CapturedRequest) error {
 	var prevTimestamp time.Time
 	var limiter *time.Ticker

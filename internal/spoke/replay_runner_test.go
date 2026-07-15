@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
@@ -122,6 +123,47 @@ func TestBuildReplayJob_TLSAndConstantRate(t *testing.T) {
 	}
 	if got := argValue(t, args, "--limit"); got != "1000" {
 		t.Errorf("--limit = %q", got)
+	}
+}
+
+func TestBuildReplayJob_ExternalEngineArgs(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{
+		Name:   "k6",
+		Config: &runtime.RawExtension{Raw: []byte(`{"vus":200}`)},
+	}
+	t.Setenv("REPLAY_PLUGIN_DIR", "/plugins")
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if got := argValue(t, args, "--engine"); got != "k6" {
+		t.Errorf("--engine = %q", got)
+	}
+	if got := argValue(t, args, "--engine-config"); got != `{"vus":200}` {
+		t.Errorf("--engine-config = %q", got)
+	}
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	if len(env) != 1 || env[0].Name != "REPLAY_PLUGIN_DIR" || env[0].Value != "/plugins" {
+		t.Errorf("plugin dir env not passed through: %+v", env)
+	}
+}
+
+func TestBuildReplayJob_BuiltinEngineOmitsEngineFlag(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{Name: "builtin"}
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if slices.Contains(args, "--engine") {
+		t.Errorf("builtin engine should not pass --engine: %v", args)
 	}
 }
 

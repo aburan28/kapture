@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
@@ -145,6 +146,24 @@ func TestBuildStartDirective_MapsSpec(t *testing.T) {
 	}
 	if spec.Rate.Mode != string(capturev1alpha1.ReplayRateModeConstant) || spec.Rate.RequestsPerSecond != 100 {
 		t.Errorf("rate wrong: %+v (want 400/4=100 rps)", spec.Rate)
+	}
+}
+
+func TestBuildStartDirective_MapsEngine(t *testing.T) {
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.TotalShards = 1
+	lt.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{
+		Name:   "k6",
+		Config: &runtime.RawExtension{Raw: []byte(`{"vus":100}`)},
+	}
+
+	d := r.buildStartDirective(lt, 0)
+	if d.Spec.EngineName != "k6" {
+		t.Errorf("engine name = %q, want k6", d.Spec.EngineName)
+	}
+	if string(d.Spec.EngineConfigJson) != `{"vus":100}` {
+		t.Errorf("engine config = %s", d.Spec.EngineConfigJson)
 	}
 }
 

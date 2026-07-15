@@ -123,6 +123,12 @@ replayEngine:
     repository: kapture/replay-engine
     tag: "dev"
     pullPolicy: IfNotPresent
+  # -- Directory inside replay worker pods that holds engine plugin
+  # binaries (kapture-engine-<name>) for non-builtin engines such as k6
+  # and ghz. Bake plugins into the replay-engine image at this path or
+  # mount them via a volume in a customised Job template. Empty disables
+  # plugin discovery configuration (builtin engine only).
+  pluginDir: ""
 
 # -- Namespace to deploy into (defaults to Release.Namespace)
 namespace: ""
