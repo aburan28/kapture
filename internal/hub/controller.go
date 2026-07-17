@@ -41,29 +41,34 @@ func (r *CaptureHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // Reconcile handles CaptureHub CR changes: starts/reconfigures the gRPC server
-// and updates the status with aggregated spoke data.
+// and updates the status with aggregated spoke data. The gRPC server is a
+// process-wide singleton, so it always follows the authoritative CaptureHub
+// (oldest by creation time) regardless of which CR triggered the reconcile —
+// creating or deleting an extra CaptureHub must not retarget or stop a
+// running hub.
 func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("capturehub", req.Name)
 
-	var hub capturev1alpha1.CaptureHub
-	if err := r.Get(ctx, req.NamespacedName, &hub); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			// CaptureHub deleted — stop the gRPC server.
-			log.Info("CaptureHub deleted, stopping gRPC server")
-			r.stopServer()
-			return ctrl.Result{}, nil
-		}
+	var hubs capturev1alpha1.CaptureHubList
+	if err := r.List(ctx, &hubs); err != nil {
 		return ctrl.Result{}, err
 	}
 
+	hub := authoritativeHub(hubs.Items)
+	if hub == nil {
+		log.Info("no CaptureHub resources remain, stopping gRPC server")
+		r.stopServer()
+		return ctrl.Result{}, nil
+	}
+
 	// Ensure the gRPC server is running with the configured address.
-	if err := r.ensureServer(ctx, &hub); err != nil {
+	if err := r.ensureServer(ctx, hub); err != nil {
 		log.Error(err, "failed to ensure gRPC server")
 		return ctrl.Result{}, err
 	}
 
 	// Update CaptureHub status with aggregated spoke information.
-	if err := r.updateStatus(ctx, &hub); err != nil {
+	if err := r.updateStatus(ctx, hub); err != nil {
 		log.Error(err, "failed to update CaptureHub status")
 		return ctrl.Result{}, err
 	}
@@ -72,6 +77,22 @@ func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// in-memory registry without touching the CR, so refresh the status
 	// periodically rather than only on CR edits.
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// authoritativeHub selects which CaptureHub the singleton gRPC server
+// follows when several exist: the oldest by creation time, name as
+// tiebreak.
+func authoritativeHub(items []capturev1alpha1.CaptureHub) *capturev1alpha1.CaptureHub {
+	var active *capturev1alpha1.CaptureHub
+	for i := range items {
+		h := &items[i]
+		if active == nil ||
+			h.CreationTimestamp.Time.Before(active.CreationTimestamp.Time) ||
+			(h.CreationTimestamp.Time.Equal(active.CreationTimestamp.Time) && h.Name < active.Name) {
+			active = h
+		}
+	}
+	return active
 }
 
 // ensureServer starts or reconfigures the gRPC server, with TLS/mTLS from

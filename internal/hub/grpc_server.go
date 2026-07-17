@@ -27,6 +27,9 @@ const (
 	// DirectiveBufferSize is how many directives can be queued per spoke
 	// before SendDirective starts rejecting with ResourceExhausted.
 	DirectiveBufferSize = 32
+	// StopGracePeriod bounds how long Stop waits for in-flight RPCs before
+	// force-closing connections.
+	StopGracePeriod = 5 * time.Second
 )
 
 // spokeEntry tracks a connected spoke in the in-memory registry.
@@ -61,13 +64,19 @@ type Server struct {
 
 	grpcServer *grpc.Server
 	address    string
+
+	// shutdown is closed when the server stops so long-lived streaming
+	// handlers (WatchDirectives) return instead of blocking GracefulStop.
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
 }
 
 // NewServer creates a new hub gRPC server.
 func NewServer(address string, opts ...grpc.ServerOption) *Server {
 	s := &Server{
-		spokes:  make(map[string]*spokeEntry),
-		address: address,
+		spokes:   make(map[string]*spokeEntry),
+		address:  address,
+		shutdown: make(chan struct{}),
 	}
 	s.grpcServer = grpc.NewServer(opts...)
 	hubv1.RegisterHubServiceServer(s.grpcServer, s)
@@ -86,19 +95,35 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on %s: %w", s.address, err)
 	}
 
-	// Shut down gracefully when context is cancelled.
+	// Shut down when context is cancelled.
 	go func() {
 		<-ctx.Done()
-		s.grpcServer.GracefulStop()
+		s.Stop()
 	}()
 
 	return s.grpcServer.Serve(lis)
 }
 
-// Stop gracefully stops the gRPC server.
+// Stop stops the gRPC server. It first signals streaming handlers to
+// return — GracefulStop alone would block forever on the long-lived
+// WatchDirectives streams held by connected spokes — then falls back to a
+// hard stop if graceful shutdown does not finish within StopGracePeriod.
 func (s *Server) Stop() {
-	if s.grpcServer != nil {
+	if s.grpcServer == nil {
+		return
+	}
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
+
+	done := make(chan struct{})
+	go func() {
 		s.grpcServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(StopGracePeriod):
+		s.grpcServer.Stop()
+		<-done
 	}
 }
 
@@ -247,6 +272,8 @@ func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.
 		select {
 		case <-stream.Context().Done():
 			return stream.Context().Err()
+		case <-s.shutdown:
+			return status.Error(codes.Unavailable, "hub shutting down")
 		case <-entry.done:
 			return status.Errorf(codes.Aborted, "spoke %q deregistered", req.SpokeId)
 		case resp := <-entry.directives:
