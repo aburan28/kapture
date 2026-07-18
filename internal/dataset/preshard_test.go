@@ -124,6 +124,64 @@ func TestPreshard_RoundTripThroughRealStorage(t *testing.T) {
 			t.Errorf("request %s appears in %d slices, want exactly 1", id, count)
 		}
 	}
+
+	// Every slice must have a manifest matching its content, loadable
+	// through the reader the replay engine uses for preflight.
+	for i := 0; i < shards; i++ {
+		sliceID := ShardSliceCaptureID("prod/orders", i, shards)
+		reader, err := replay.NewFilesystemReader(replay.FilesystemReaderConfig{MountPath: mount})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := reader.LoadManifest(context.Background(), sliceID)
+		if err != nil {
+			t.Fatalf("load manifest for slice %d: %v", i, err)
+		}
+		if data == nil {
+			t.Fatalf("slice %d has no manifest", i)
+		}
+		manifest, err := ParseManifest(data)
+		if err != nil {
+			t.Fatalf("parse manifest for slice %d: %v", i, err)
+		}
+		if manifest.RecordCount != result.ShardCounts[i] {
+			t.Errorf("slice %d manifest records = %d, want %d", i, manifest.RecordCount, result.ShardCounts[i])
+		}
+		if manifest.SHA256 == "" {
+			t.Errorf("slice %d manifest has no checksum", i)
+		}
+		if manifest.ShardIndex == nil || *manifest.ShardIndex != int32(i) {
+			t.Errorf("slice %d manifest shardIndex = %v", i, manifest.ShardIndex)
+		}
+		if manifest.SourceCaptureID != "prod/orders" {
+			t.Errorf("slice %d manifest sourceCaptureID = %q", i, manifest.SourceCaptureID)
+		}
+	}
+
+	// The manifest must not be picked up as a data object on re-read.
+	reader, err := replay.NewFilesystemReader(replay.FilesystemReaderConfig{MountPath: mount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sliceID := ShardSliceCaptureID("prod/orders", 0, shards)
+	if err := reader.Open(context.Background(), replay.ReadOptions{CaptureID: sliceID}); err != nil {
+		t.Fatalf("re-open slice 0: %v", err)
+	}
+	var reread int64
+	for {
+		_, err := reader.Next(context.Background())
+		if errors.Is(err, replay.ErrReaderDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("re-read slice 0 with manifest present: %v", err)
+		}
+		reread++
+	}
+	reader.Close()
+	if reread != result.ShardCounts[0] {
+		t.Errorf("re-read %d requests with manifest present, want %d", reread, result.ShardCounts[0])
+	}
 }
 
 func TestPreshard_Validation(t *testing.T) {

@@ -40,6 +40,20 @@ func newFilesystemWriterFactory(mountPath, agentPod string, flushInterval time.D
 	}, nil
 }
 
+func (f *filesystemWriterFactory) putManifest(captureID string, data []byte) error {
+	if captureID == "" {
+		return fmt.Errorf("capture ID is required")
+	}
+	path := filepath.Join(f.mountPath, captureID, ManifestObjectName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create directory for %q: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write manifest %q: %w", path, err)
+	}
+	return nil
+}
+
 func (f *filesystemWriterFactory) newWriter(captureID string) (*bufferedObjectWriter, error) {
 	if captureID == "" {
 		return nil, fmt.Errorf("capture ID is required")
@@ -70,6 +84,11 @@ func NewEFSWriterFactory(cfg EFSConfig) (*EFSWriterFactory, error) {
 		return nil, err
 	}
 	return &EFSWriterFactory{filesystem: filesystem}, nil
+}
+
+// PutManifest stores the dataset manifest for a capture.
+func (f *EFSWriterFactory) PutManifest(_ context.Context, captureID string, data []byte) error {
+	return f.filesystem.putManifest(captureID, data)
 }
 
 func (f *EFSWriterFactory) NewWriter(_ context.Context, captureID string) (Writer, error) {

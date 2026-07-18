@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -195,6 +198,11 @@ func (r *S3Reader) listObjects(ctx context.Context, prefix string, opts ReadOpti
 
 		for _, obj := range output.Contents {
 			key := aws.ToString(obj.Key)
+			// Only capture data objects are JSONL.gz; skip manifests and
+			// any other stray objects under the prefix.
+			if !strings.HasSuffix(key, ".jsonl.gz") {
+				continue
+			}
 			if filterObjectByTime(key, opts.StartTime, opts.EndTime) {
 				objects = append(objects, key)
 			}
@@ -208,6 +216,42 @@ func (r *S3Reader) listObjects(ctx context.Context, prefix string, opts ReadOpti
 
 	sort.Strings(objects)
 	return objects, nil
+}
+
+// LoadManifest returns the dataset manifest for a capture, or (nil, nil)
+// when none exists.
+func (r *S3Reader) LoadManifest(ctx context.Context, captureID string) ([]byte, error) {
+	key := buildObjectPrefix(r.prefix, captureID) + "/" + storage.ManifestObjectName
+	output, err := r.client.GetObject(ctx, &awss3.GetObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		if isS3NotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get manifest %q: %w", key, err)
+	}
+	defer output.Body.Close()
+	data, err := io.ReadAll(output.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest %q: %w", key, err)
+	}
+	return data, nil
+}
+
+// isS3NotFound reports whether an S3 error is a missing-object error.
+func isS3NotFound(err error) bool {
+	var noSuchKey *s3types.NoSuchKey
+	if errors.As(err, &noSuchKey) {
+		return true
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		code := apiErr.ErrorCode()
+		return code == "NoSuchKey" || code == "NotFound"
+	}
+	return false
 }
 
 func (r *S3Reader) openObject(ctx context.Context, key string) error {
@@ -326,4 +370,3 @@ func matchesReadOptions(req *storage.CapturedRequest, opts ReadOptions) bool {
 	}
 	return true
 }
-

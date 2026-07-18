@@ -18,9 +18,14 @@ package dataset
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
+	"time"
 
 	"github.com/kapture-io/kapture/internal/plugin/replay"
 	"github.com/kapture-io/kapture/internal/storage"
@@ -66,6 +71,14 @@ func Preshard(ctx context.Context, reader replay.Reader, readOpts replay.ReadOpt
 		writers[i] = w
 	}
 
+	// Per-slice digests over the uncompressed JSONL lines in write order.
+	// json.Marshal here produces the same bytes the buffered writer stores,
+	// so the digest matches the stored slice content.
+	digests := make([]hash.Hash, shardCount)
+	for i := range digests {
+		digests[i] = sha256.New()
+	}
+
 	result := &PreshardResult{ShardCounts: make([]int64, shardCount)}
 	for {
 		req, err := reader.Next(ctx)
@@ -82,6 +95,13 @@ func Preshard(ctx context.Context, reader replay.Reader, readOpts replay.ReadOpt
 			closeWriters(writers)
 			return nil, fmt.Errorf("write shard %d: %w", shard, err)
 		}
+		line, err := json.Marshal(req)
+		if err != nil {
+			closeWriters(writers)
+			return nil, fmt.Errorf("marshal request for digest: %w", err)
+		}
+		digests[shard].Write(line)
+		digests[shard].Write([]byte{'\n'})
 		result.ShardCounts[shard]++
 		result.Total++
 	}
@@ -96,6 +116,34 @@ func Preshard(ctx context.Context, reader replay.Reader, readOpts replay.ReadOpt
 		if err := w.Close(); err != nil {
 			closeWriters(writers[i+1:])
 			return nil, fmt.Errorf("close shard %d: %w", i, err)
+		}
+	}
+
+	// Publish a manifest per slice so replays can verify the layout before
+	// streaming. Written after the data so a manifest's presence implies a
+	// complete slice; skipped silently on factories without manifest
+	// support.
+	if mw, ok := factory.(storage.ManifestWriter); ok {
+		now := time.Now().UTC()
+		for i := range writers {
+			index, count := int32(i), int32(shardCount)
+			manifest := &Manifest{
+				FormatVersion:   ManifestFormatVersion,
+				CaptureID:       ShardSliceCaptureID(captureID, i, shardCount),
+				RecordCount:     result.ShardCounts[i],
+				SHA256:          hex.EncodeToString(digests[i].Sum(nil)),
+				ShardIndex:      &index,
+				ShardCount:      &count,
+				SourceCaptureID: captureID,
+				CreatedAt:       now,
+			}
+			data, err := manifest.Marshal()
+			if err != nil {
+				return nil, fmt.Errorf("marshal shard %d manifest: %w", i, err)
+			}
+			if err := mw.PutManifest(ctx, manifest.CaptureID, data); err != nil {
+				return nil, fmt.Errorf("write shard %d manifest: %w", i, err)
+			}
 		}
 	}
 	return result, nil

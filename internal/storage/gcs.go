@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	gcsstorage "cloud.google.com/go/storage"
@@ -57,6 +59,28 @@ func NewGCSWriterFactory(ctx context.Context, cfg GCSConfig) (*GCSWriterFactory,
 		}
 	}
 	return &GCSWriterFactory{config: cfg}, nil
+}
+
+// PutManifest stores the dataset manifest for a capture under
+// "{prefix}/{captureID}/manifest.json".
+func (f *GCSWriterFactory) PutManifest(ctx context.Context, captureID string, data []byte) error {
+	if captureID == "" {
+		return fmt.Errorf("capture ID is required")
+	}
+	key := path.Join(strings.Trim(f.config.Prefix, "/"), captureID, ManifestObjectName)
+	writer, err := f.config.OpenWriter(ctx, f.config.Bucket, key)
+	if err != nil {
+		return fmt.Errorf("open gcs writer for %q: %w", key, err)
+	}
+	writer.SetContentType("application/json")
+	if _, err := writer.Write(data); err != nil {
+		_ = writer.Close()
+		return fmt.Errorf("write gcs manifest %q: %w", key, err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close gcs manifest %q: %w", key, err)
+	}
+	return nil
 }
 
 func (f *GCSWriterFactory) NewWriter(_ context.Context, captureID string) (Writer, error) {

@@ -26,6 +26,11 @@ func NewEBSWriterFactory(cfg EBSConfig) (*EBSWriterFactory, error) {
 	return &EBSWriterFactory{filesystem: filesystem}, nil
 }
 
+// PutManifest stores the dataset manifest for a capture.
+func (f *EBSWriterFactory) PutManifest(_ context.Context, captureID string, data []byte) error {
+	return f.filesystem.putManifest(captureID, data)
+}
+
 func (f *EBSWriterFactory) NewWriter(_ context.Context, captureID string) (Writer, error) {
 	writer, err := f.filesystem.newWriter(captureID)
 	if err != nil {

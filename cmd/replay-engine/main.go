@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kapture-io/kapture/internal/dataset"
 	"github.com/kapture-io/kapture/internal/plugin/replay"
 	hostengine "github.com/kapture-io/kapture/internal/replayengine"
 	replayenginev1 "github.com/kapture-io/kapture/proto/replayengine/v1"
@@ -198,6 +199,12 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 	}
 	defer reader.Close()
 
+	// Manifest preflight: verify the dataset before streaming anything.
+	// Presharded slices publish manifests; raw captures may have none.
+	if err := manifestPreflight(ctx, reader, cfg, logger); err != nil {
+		return err
+	}
+
 	// Feed server mode: start HTTP server and block.
 	if cfg.serve {
 		return runFeedServer(ctx, cfg, reader, logger)
@@ -210,6 +217,37 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 
 	// Direct mode: use the builtin replay engine in-process.
 	return runDirectReplay(ctx, cfg, reader, logger)
+}
+
+// manifestPreflight loads the dataset manifest when the reader supports it
+// and the dataset has one. A manifest lets the run fail fast — before any
+// storage streaming or engine launch — on version skew and on empty
+// datasets (a typoed capture ID or a missing preshard layout).
+func manifestPreflight(ctx context.Context, reader replay.Reader, cfg config, logger *slog.Logger) error {
+	loader, ok := reader.(replay.ManifestLoader)
+	if !ok {
+		return nil
+	}
+	data, err := loader.LoadManifest(ctx, cfg.captureID)
+	if err != nil {
+		return fmt.Errorf("load dataset manifest: %w", err)
+	}
+	if data == nil {
+		logger.Debug("no dataset manifest; skipping preflight", "captureId", cfg.captureID)
+		return nil
+	}
+	manifest, err := dataset.ParseManifest(data)
+	if err != nil {
+		return fmt.Errorf("dataset manifest for %q: %w", cfg.captureID, err)
+	}
+	if cfg.failOnEmpty && manifest.RecordCount == 0 {
+		return fmt.Errorf("dataset manifest for %q declares 0 records; pass --fail-on-empty=false to allow empty replays", cfg.captureID)
+	}
+	logger.Info("dataset manifest verified",
+		"captureId", cfg.captureID,
+		"records", manifest.RecordCount,
+		"formatVersion", manifest.FormatVersion)
+	return nil
 }
 
 // runExternalEngine streams the capture through a plugin engine (k6, ghz,
