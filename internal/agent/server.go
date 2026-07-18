@@ -23,7 +23,9 @@ type AgentServerConfig struct {
 	GRPCPort   int
 	HealthPort int
 	Handler    *CaptureHandler
-	Logger     *slog.Logger
+	// Queue optionally exposes write-queue metrics on /metrics.
+	Queue  *AsyncWriter
+	Logger *slog.Logger
 }
 
 // AgentServer hosts HTTP and gRPC sink servers that receive mirrored traffic,
@@ -33,6 +35,7 @@ type AgentServer struct {
 	grpcServer   *grpc.Server
 	healthServer *http.Server
 	handler      *CaptureHandler
+	queue        *AsyncWriter
 	log          *slog.Logger
 	httpPort     int
 	grpcPort     int
@@ -56,6 +59,7 @@ func NewAgentServer(cfg AgentServerConfig) *AgentServer {
 
 	s := &AgentServer{
 		handler:    cfg.Handler,
+		queue:      cfg.Queue,
 		log:        cfg.Logger,
 		httpPort:   cfg.HTTPPort,
 		grpcPort:   cfg.GRPCPort,
@@ -88,8 +92,6 @@ func NewAgentServer(cfg AgentServerConfig) *AgentServer {
 
 	return s
 }
-
-
 
 // Start launches all servers and blocks until ctx is cancelled or an error occurs.
 func (s *AgentServer) Start(ctx context.Context) error {
@@ -220,10 +222,10 @@ func (s *AgentServer) handleGRPC(_ any, stream grpc.ServerStream) error {
 type rawMessage []byte
 
 func (r *rawMessage) Marshal() ([]byte, error) { return *r, nil }
-func (r *rawMessage) Unmarshal(b []byte) error  { *r = b; return nil }
-func (r *rawMessage) ProtoMessage()             {}
-func (r *rawMessage) Reset()                    { *r = nil }
-func (r *rawMessage) String() string            { return string(*r) }
+func (r *rawMessage) Unmarshal(b []byte) error { *r = b; return nil }
+func (r *rawMessage) ProtoMessage()            {}
+func (r *rawMessage) Reset()                   { *r = nil }
+func (r *rawMessage) String() string           { return string(*r) }
 
 // handleHealth serves health check endpoint.
 func (s *AgentServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -248,4 +250,19 @@ func (s *AgentServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP capture_agent_bytes_received_total Bytes received\n")
 	fmt.Fprintf(w, "# TYPE capture_agent_bytes_received_total counter\n")
 	fmt.Fprintf(w, "capture_agent_bytes_received_total %d\n", bytesRecv)
+
+	if s.queue != nil {
+		fmt.Fprintf(w, "# HELP capture_agent_write_queue_depth Captures waiting for storage\n")
+		fmt.Fprintf(w, "# TYPE capture_agent_write_queue_depth gauge\n")
+		fmt.Fprintf(w, "capture_agent_write_queue_depth %d\n", s.queue.QueueDepth())
+		fmt.Fprintf(w, "# HELP capture_agent_write_queue_capacity Bounded write queue size\n")
+		fmt.Fprintf(w, "# TYPE capture_agent_write_queue_capacity gauge\n")
+		fmt.Fprintf(w, "capture_agent_write_queue_capacity %d\n", s.queue.QueueCapacity())
+		fmt.Fprintf(w, "# HELP capture_agent_queue_dropped_total Captures dropped because the write queue was full\n")
+		fmt.Fprintf(w, "# TYPE capture_agent_queue_dropped_total counter\n")
+		fmt.Fprintf(w, "capture_agent_queue_dropped_total %d\n", s.queue.Dropped())
+		fmt.Fprintf(w, "# HELP capture_agent_storage_write_errors_total Storage write failures\n")
+		fmt.Fprintf(w, "# TYPE capture_agent_storage_write_errors_total counter\n")
+		fmt.Fprintf(w, "capture_agent_storage_write_errors_total %d\n", s.queue.WriteErrors())
+	}
 }

@@ -137,4 +137,3 @@ func (bw *BufferedWriter) flushLoop(ctx context.Context) {
 		}
 	}
 }
-

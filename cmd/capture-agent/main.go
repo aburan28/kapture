@@ -40,6 +40,7 @@ func main() {
 		filterPathPrefix = flag.String("filter-path-prefix", envOr("FILTER_PATH_PREFIX", ""), "Only capture requests whose path starts with this prefix")
 		filterHeaders    = flag.String("filter-headers", envOr("FILTER_HEADERS", ""), `Header filters as JSON array, e.g. [{"name":"x-debug","value":"true"}]`)
 		filterPercentage = flag.Int("filter-percentage", envIntOr("FILTER_PERCENTAGE", 100), "Percentage of requests to capture (0-100)")
+		writeQueueSize   = flag.Int("write-queue-size", envIntOr("CAPTURE_WRITE_QUEUE_SIZE", agent.DefaultWriteQueueSize), "Bounded write queue size between capture and storage; new captures are dropped (and counted) when full")
 	)
 	flag.Parse()
 
@@ -123,6 +124,11 @@ func main() {
 		Logger:        log,
 	})
 
+	// The async queue keeps the capture hot path non-blocking: storage
+	// stalls fill the bounded queue and then drop (counted) instead of
+	// stalling mirrored traffic.
+	asyncWriter := agent.NewAsyncWriter(bufferedWriter, *writeQueueSize, log)
+
 	headerFilters, err := agent.ParseHeaderFilters(*filterHeaders)
 	if err != nil {
 		log.Error("failed to parse header filters", "error", err)
@@ -138,7 +144,7 @@ func main() {
 	}
 
 	handler := agent.NewCaptureHandler(agent.CaptureHandlerConfig{
-		Writer:        bufferedWriter,
+		Writer:        asyncWriter,
 		MaxBodyBytes:  *maxBodyBytes,
 		Filter:        requestFilter,
 		RedactHeaders: parseRedactHeaders(os.Getenv("CAPTURE_REDACT_HEADERS")),
@@ -150,6 +156,7 @@ func main() {
 		GRPCPort:   *grpcPort,
 		HealthPort: *healthPort,
 		Handler:    handler,
+		Queue:      asyncWriter,
 		Logger:     log,
 	})
 
@@ -167,9 +174,11 @@ func main() {
 		log.Error("server exited with error", "error", serverErr)
 	}
 
-	log.Info("shutting down buffered writer")
-	if err := bufferedWriter.Close(); err != nil {
-		log.Error("buffered writer close error", "error", err)
+	log.Info("shutting down capture write pipeline")
+	// Closing the async writer drains its queue and closes the buffered
+	// writer underneath.
+	if err := asyncWriter.Close(); err != nil {
+		log.Error("write pipeline close error", "error", err)
 		if serverErr == nil {
 			serverErr = err
 		}
