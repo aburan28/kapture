@@ -55,8 +55,10 @@ spec:
                   filesystem:
                     type: string
                   mountPath:
+                    pattern: ^/.*
                     type: string
                   volumeID:
+                    minLength: 1
                     type: string
                 required:
                 - mountPath
@@ -68,8 +70,10 @@ spec:
                   directory:
                     type: string
                   fileSystemID:
+                    minLength: 1
                     type: string
                   mountPath:
+                    pattern: ^/.*
                     type: string
                 required:
                 - fileSystemID
@@ -79,6 +83,8 @@ spec:
                 description: GCSConfig defines Google Cloud Storage settings.
                 properties:
                   bucket:
+                    maxLength: 222
+                    minLength: 3
                     type: string
                   credentialsSecretRef:
                     description: |-
@@ -143,6 +149,7 @@ spec:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                   path:
+                    minLength: 1
                     type: string
                   symbol:
                     type: string
@@ -165,6 +172,8 @@ spec:
                 description: S3Config defines Amazon S3 storage settings.
                 properties:
                   bucket:
+                    maxLength: 63
+                    minLength: 3
                     type: string
                   credentialsSecretRef:
                     description: |-
@@ -219,6 +228,7 @@ spec:
                   prefix:
                     type: string
                   region:
+                    minLength: 1
                     type: string
                 required:
                 - bucket
@@ -236,6 +246,17 @@ spec:
             required:
             - type
             type: object
+            x-kubernetes-validations:
+            - message: s3 configuration is required when type is S3
+              rule: self.type != 'S3' || has(self.s3)
+            - message: gcs configuration is required when type is GCS
+              rule: self.type != 'GCS' || has(self.gcs)
+            - message: efs configuration is required when type is EFS
+              rule: self.type != 'EFS' || has(self.efs)
+            - message: ebs configuration is required when type is EBS
+              rule: self.type != 'EBS' || has(self.ebs)
+            - message: plugin configuration is required when type is Plugin
+              rule: self.type != 'Plugin' || has(self.plugin)
           status:
             description: CaptureStorageStatus defines the observed state of CaptureStorage.
             properties:

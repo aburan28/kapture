@@ -60,6 +60,11 @@ spec:
                 - type
                 type: object
               grpcAddress:
+                description: |-
+                  GRPCAddress is the listen address for the hub gRPC server, in Go
+                  net.Listen form: ":9443" or "host:port".
+                minLength: 2
+                pattern: ^.*:[0-9]+$
                 type: string
               tls:
                 description: CaptureHubTLSConfig defines TLS settings for the hub
@@ -121,6 +126,10 @@ spec:
             required:
             - grpcAddress
             type: object
+            x-kubernetes-validations:
+            - message: tls.certSecretRef is required when authentication.type is mTLS
+              rule: '!has(self.authentication) || self.authentication.type != ''mTLS''
+                || has(self.tls)'
           status:
             description: CaptureHubStatus defines the observed state of CaptureHub.
             properties:

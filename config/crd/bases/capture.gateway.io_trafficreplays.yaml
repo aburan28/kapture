@@ -80,6 +80,8 @@ spec:
                     description: |-
                       Name of the engine: "builtin" (native HTTP sender, default), "k6",
                       "ghz", or any installed plugin name.
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
                     type: string
                 type: object
               filters:
@@ -99,7 +101,10 @@ spec:
                   methods:
                     description: Methods filters to specific HTTP methods.
                     items:
+                      maxLength: 32
+                      minLength: 1
                       type: string
+                    maxItems: 16
                     type: array
                   pathPrefix:
                     description: PathPrefix filters to requests whose path starts
@@ -111,6 +116,10 @@ spec:
                     format: date-time
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: startTime must be before endTime
+                  rule: '!has(self.startTime) || !has(self.endTime) || self.startTime
+                    < self.endTime'
               loadTestRef:
                 description: |-
                   LoadTestRef links this replay to the CaptureLoadTest that spawned it.
@@ -118,6 +127,8 @@ spec:
                   directive; user-created replays leave it unset.
                 properties:
                   name:
+                    maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name
@@ -143,10 +154,16 @@ spec:
                     description: |-
                       TimeScale multiplies original inter-request delays when Mode is
                       OriginalTiming. 1.0 = real-time, 0.5 = 2x speed.
+                    pattern: ^[0-9]+(\.[0-9]+)?$
                     type: string
                 required:
                 - mode
                 type: object
+                x-kubernetes-validations:
+                - message: requestsPerSecond is required when mode is Constant
+                  rule: self.mode != 'Constant' || has(self.requestsPerSecond)
+                - message: timeScale only applies when mode is OriginalTiming
+                  rule: self.mode == 'OriginalTiming' || !has(self.timeScale)
               safety:
                 description: Safety guards where replayed traffic may be sent.
                 properties:
@@ -158,7 +175,10 @@ spec:
                       opt-in); once set, a target that matches no pattern is rejected
                       before any traffic is generated.
                     items:
+                      maxLength: 253
+                      pattern: ^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
                       type: string
+                    maxItems: 64
                     type: array
                 type: object
               shard:
@@ -189,11 +209,16 @@ spec:
                 - count
                 - index
                 type: object
+                x-kubernetes-validations:
+                - message: shard index must be less than shard count
+                  rule: self.index < self.count
               sourceRef:
                 description: SourceRef references the TrafficCapture whose data should
                   be replayed.
                 properties:
                   name:
+                    maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name
@@ -219,11 +244,16 @@ spec:
                   host:
                     description: Host is the target hostname or IP to replay traffic
                       to.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
                     type: string
                   port:
                     description: Port is the target port. Defaults to 80 for HTTP,
                       443 for HTTPS.
                     format: int32
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                   tls:
                     default: false

@@ -23,7 +23,13 @@ type CaptureHubAuthentication struct {
 }
 
 // CaptureHubSpec defines the desired state of CaptureHub.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.authentication) || self.authentication.type != 'mTLS' || has(self.tls)",message="tls.certSecretRef is required when authentication.type is mTLS"
 type CaptureHubSpec struct {
+	// GRPCAddress is the listen address for the hub gRPC server, in Go
+	// net.Listen form: ":9443" or "host:port".
+	// +kubebuilder:validation:MinLength=2
+	// +kubebuilder:validation:Pattern=`^.*:[0-9]+$`
 	GRPCAddress string `json:"grpcAddress"`
 	// +optional
 	TLS *CaptureHubTLSConfig `json:"tls,omitempty"`

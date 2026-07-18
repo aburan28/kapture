@@ -52,6 +52,7 @@ type CaptureSettings struct {
 	// +kubebuilder:validation:Minimum=0
 	MaxBodyBytes *int64 `json:"maxBodyBytes,omitempty"`
 	// +optional
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
 	Duration *string `json:"duration,omitempty"`
 
 	// RedactHeaders lists additional headers whose values are replaced
@@ -70,6 +71,8 @@ type CaptureSettings struct {
 }
 
 // AgentScalingSpec configures capture agent scaling.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || !has(self.maxReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must not exceed maxReplicas"
 type AgentScalingSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0

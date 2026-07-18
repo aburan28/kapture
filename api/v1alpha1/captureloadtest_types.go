@@ -36,6 +36,9 @@ type LoadTestDistribution struct {
 	// Cells restricts the load test to spokes registered in these cells.
 	// Empty means all connected spokes are eligible.
 	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=63
 	Cells []string `json:"cells,omitempty"`
 
 	// MaxSpokes caps how many spokes participate. Zero or unset means all

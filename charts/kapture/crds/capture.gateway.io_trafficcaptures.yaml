@@ -73,6 +73,10 @@ spec:
                     minimum: 1
                     type: integer
                 type: object
+                x-kubernetes-validations:
+                - message: minReplicas must not exceed maxReplicas
+                  rule: '!has(self.minReplicas) || !has(self.maxReplicas) || self.minReplicas
+                    <= self.maxReplicas'
               capture:
                 description: CaptureSettings controls how mirrored traffic is recorded.
                 properties:
@@ -84,6 +88,7 @@ spec:
                       the capture pipeline and storage are trusted with live secrets.
                     type: boolean
                   duration:
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$
                     type: string
                   includeBody:
                     type: boolean
