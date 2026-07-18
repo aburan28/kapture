@@ -345,6 +345,10 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 	hub.Status.ActiveCaptures = srv.ActiveCaptureCount()
 	hub.Status.ActiveReplays = srv.ActiveReplayCount()
 
+	metricConnectedSpokes.Set(float64(hub.Status.ConnectedSpokes))
+	metricActiveCaptures.Set(float64(hub.Status.ActiveCaptures))
+	metricActiveReplays.Set(float64(hub.Status.ActiveReplays))
+
 	spokeSnapshots := srv.SpokeStatuses()
 	hub.Status.Spokes = make([]capturev1alpha1.CaptureHubSpokeStatus, len(spokeSnapshots))
 	for i, ss := range spokeSnapshots {

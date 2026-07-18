@@ -187,6 +187,7 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 
 	resp, err := client.Heartbeat(rpcCtx, req)
 	if err != nil {
+		metricHubRPCErrors.WithLabelValues("Heartbeat").Inc()
 		c.log.Error(err, "heartbeat failed")
 		return
 	}
@@ -214,6 +215,7 @@ func (c *HubClient) ReportStatus(ctx context.Context, statuses []*hubv1.CaptureS
 		Statuses: statuses,
 	})
 	if err != nil {
+		metricHubRPCErrors.WithLabelValues("ReportCaptureStatus").Inc()
 		return fmt.Errorf("reporting status: %w", err)
 	}
 	return nil
@@ -237,6 +239,7 @@ func (c *HubClient) ReportReplayStatus(ctx context.Context, statuses []*hubv1.Re
 		Statuses: statuses,
 	})
 	if err != nil {
+		metricHubRPCErrors.WithLabelValues("ReportReplayStatus").Inc()
 		return fmt.Errorf("reporting replay status: %w", err)
 	}
 	return nil
@@ -288,6 +291,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 			SpokeId: spokeID,
 		})
 		if err != nil {
+			metricHubRPCErrors.WithLabelValues("WatchDirectives").Inc()
 			c.log.Error(err, "opening directive stream", "backoff", backoff)
 			sleep(backoff)
 			backoff = min(backoff*2, 60*time.Second)

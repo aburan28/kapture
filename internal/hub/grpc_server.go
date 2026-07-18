@@ -234,6 +234,7 @@ func (s *Server) Heartbeat(ctx context.Context, req *hubv1.HeartbeatRequest) (*h
 	}
 	entry.info.ActiveReplays = activeReplayCount(entry.replays)
 
+	metricHeartbeats.Inc()
 	return &hubv1.HeartbeatResponse{
 		Acknowledged:            true,
 		ActiveLoadTests:         s.activeLoadTests,
@@ -335,13 +336,16 @@ func (s *Server) queueDirective(spokeID string, resp *hubv1.WatchDirectivesRespo
 	entry, ok := s.spokes[spokeID]
 	s.mu.RUnlock()
 	if !ok {
+		metricDirectiveRejects.WithLabelValues("not_registered").Inc()
 		return status.Errorf(codes.NotFound, "spoke %q not registered", spokeID)
 	}
 
 	select {
 	case entry.directives <- resp:
+		metricDirectivesQueued.Inc()
 		return nil
 	default:
+		metricDirectiveRejects.WithLabelValues("buffer_full").Inc()
 		return status.Errorf(codes.ResourceExhausted, "directive buffer full for spoke %q", spokeID)
 	}
 }

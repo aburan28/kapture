@@ -1,0 +1,71 @@
+{
+  "title": "Kapture",
+  "uid": "kapture-overview",
+  "schemaVersion": 39,
+  "tags": ["kapture"],
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Connected spokes",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "kapture_hub_connected_spokes" }]
+    },
+    {
+      "type": "stat",
+      "title": "Active captures",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "kapture_hub_active_captures" }]
+    },
+    {
+      "type": "stat",
+      "title": "Active replay shards",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "kapture_hub_active_replays" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Heartbeats received /s",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "rate(kapture_hub_heartbeats_total[5m])" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Directive queue rejects /s (by reason)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(kapture_hub_directive_rejects_total[5m])", "legendFormat": "{{reason}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Spoke → hub RPC errors /s (by RPC)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(kapture_spoke_hub_rpc_errors_total[5m])", "legendFormat": "{{rpc}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Capture agent throughput /s",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(capture_agent_requests_total[5m])", "legendFormat": "captured" },
+        { "expr": "rate(capture_agent_requests_filtered_total[5m])", "legendFormat": "filtered" },
+        { "expr": "rate(capture_agent_requests_dropped_total[5m])", "legendFormat": "dropped" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Capture write queue",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "capture_agent_write_queue_depth", "legendFormat": "depth" },
+        { "expr": "capture_agent_write_queue_capacity", "legendFormat": "capacity" },
+        { "expr": "rate(capture_agent_queue_dropped_total[5m])", "legendFormat": "queue drops /s" },
+        { "expr": "rate(capture_agent_storage_write_errors_total[5m])", "legendFormat": "storage errors /s" }
+      ]
+    }
+  ]
+}

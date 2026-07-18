@@ -64,6 +64,7 @@ func main() {
 	if err := (&hub.CaptureLoadTestReconciler{
 		Client:         mgr.GetClient(),
 		Log:            ctrl.Log.WithName("controllers").WithName("CaptureLoadTest"),
+		Recorder:       mgr.GetEventRecorderFor("kapture-loadtest"),
 		ServerProvider: hubReconciler.GetServer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CaptureLoadTest")

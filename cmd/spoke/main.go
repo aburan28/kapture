@@ -209,6 +209,7 @@ func main() {
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		HubClient: hubClient,
+		Recorder:  mgr.GetEventRecorderFor("kapture-replay"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TrafficReplay")
 		os.Exit(1)

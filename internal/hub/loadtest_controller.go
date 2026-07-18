@@ -10,8 +10,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,6 +43,9 @@ const (
 type CaptureLoadTestReconciler struct {
 	client.Client
 	Log logr.Logger
+
+	// Recorder emits Kubernetes Events on load test transitions. Optional.
+	Recorder record.EventRecorder
 
 	// ServerProvider returns the hub gRPC server used to reach spokes.
 	// It may return nil while the CaptureHub CR has not started the server.
@@ -115,6 +120,8 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Info("replay target denied by safety allowlist",
 			"target", lt.Spec.Target.Host, "allowedHosts", lt.Spec.Safety.AllowedHosts)
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseFailed
+		r.event(&lt, corev1.EventTypeWarning, "TargetDenied",
+			"target host %q matches no pattern in spec.safety.allowedHosts", lt.Spec.Target.Host)
 		meta.SetStatusCondition(&lt.Status.Conditions, metav1.Condition{
 			Type:   capturev1alpha1.LoadTestConditionTargetAllowed,
 			Status: metav1.ConditionFalse,
@@ -165,6 +172,8 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		now := metav1.Now()
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseDistributing
 		lt.Status.StartTime = &now
+		r.event(&lt, corev1.EventTypeNormal, "ShardsDistributed",
+			"assigned %d shards across %d spokes", countShards(planned), len(planned))
 		lt.Status.Assignments = planned
 		lt.Status.AssignedSpokes = int32(len(planned))
 		lt.Status.TotalShards = countShards(planned)
@@ -225,6 +234,7 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		now := metav1.Now()
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseAborted
 		lt.Status.CompletionTime = &now
+		r.event(&lt, corev1.EventTypeWarning, "Aborted", "%s", reason)
 		meta.SetStatusCondition(&lt.Status.Conditions, metav1.Condition{
 			Type:    capturev1alpha1.LoadTestConditionAborted,
 			Status:  metav1.ConditionTrue,
@@ -246,6 +256,13 @@ func (r *CaptureLoadTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	default:
 		return ctrl.Result{RequeueAfter: r.requeueInterval()}, nil
+	}
+}
+
+// event emits a Kubernetes Event when a recorder is configured.
+func (r *CaptureLoadTestReconciler) event(lt *capturev1alpha1.CaptureLoadTest, eventType, reason, messageFmt string, args ...any) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(lt, eventType, reason, messageFmt, args...)
 	}
 }
 
@@ -489,12 +506,21 @@ func (r *CaptureLoadTestReconciler) aggregate(lt *capturev1alpha1.CaptureLoadTes
 	totalShards := lt.Status.TotalShards
 	switch {
 	case totalShards > 0 && completed == totalShards:
+		if lt.Status.Phase != capturev1alpha1.CaptureLoadTestPhaseCompleted {
+			r.event(lt, corev1.EventTypeNormal, "Completed",
+				"all %d shards finished: %d sent, %d failed requests",
+				totalShards, lt.Status.SentRequests, lt.Status.FailedRequests)
+		}
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseCompleted
 		if lt.Status.CompletionTime == nil {
 			now := metav1.Now()
 			lt.Status.CompletionTime = &now
 		}
 	case totalShards > 0 && completed+failedShards == totalShards:
+		if lt.Status.Phase != capturev1alpha1.CaptureLoadTestPhaseFailed {
+			r.event(lt, corev1.EventTypeWarning, "ShardsFailed",
+				"%d of %d shards failed", failedShards, totalShards)
+		}
 		lt.Status.Phase = capturev1alpha1.CaptureLoadTestPhaseFailed
 		if lt.Status.CompletionTime == nil {
 			now := metav1.Now()
