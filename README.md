@@ -6,6 +6,14 @@ A Kubernetes traffic capture controller that uses **Gateway API RequestMirror fi
 
 Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes by injecting `RequestMirror` filters that duplicate requests to capture agent pods. Captured data is written to pluggable storage backends (S3, GCS, EFS, EBS) in compressed JSONL format.
 
+**Documentation:**
+[Quickstart](docs/quickstart.md) ·
+[CRD Reference](docs/crd-reference.md) ·
+[Troubleshooting](docs/troubleshooting.md) ·
+[Multi-Cell Load Testing](docs/multi-cell-load-testing.md) ·
+[Replay Engine ABI](docs/replay-engine-abi.md) ·
+[TLS & Rotation](docs/tls-rotation.md)
+
 ### Key Features
 
 - **Non-invasive capture** via Gateway API RequestMirror -- no sidecars, no code changes
