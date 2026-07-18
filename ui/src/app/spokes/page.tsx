@@ -1,6 +1,6 @@
 import { HealthBadge } from "@/components/status-badge";
 import { StatCard } from "@/components/stat-card";
-import { listSpokes, listCaptures } from "@/lib/hub-client";
+import { listSpokes, listCaptures, listCells } from "@/lib/hub-client";
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -12,9 +12,10 @@ function timeAgo(dateStr: string) {
 }
 
 export default async function SpokesPage() {
-  const [spokes, captures] = await Promise.all([
+  const [spokes, captures, cells] = await Promise.all([
     listSpokes(),
     listCaptures(),
+    listCells(),
   ]);
 
   const healthy = spokes.filter((s) => s.healthState === "Healthy").length;
@@ -36,6 +37,33 @@ export default async function SpokesPage() {
         <StatCard label="Healthy" value={healthy} color="emerald" />
         <StatCard label="Degraded" value={degraded} color="amber" />
         <StatCard label="Disconnected" value={disconnected} color="red" />
+      </div>
+
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-white mb-3">Cells</h2>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {cells.map((cell) => (
+            <div
+              key={cell.name}
+              className="bg-gray-900 border border-gray-800 rounded-xl p-5"
+            >
+              <p className="text-white font-medium">{cell.name}</p>
+              <p className="text-xs text-gray-500 mb-3">
+                {cell.connectedSpokes}/{cell.totalSpokes} spokes connected
+              </p>
+              <div className="flex gap-6 text-sm">
+                <div>
+                  <p className="text-xs text-gray-400">Captures</p>
+                  <p className="text-gray-200">{cell.activeCaptures}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Replays</p>
+                  <p className="text-gray-200">{cell.activeReplays}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4">

@@ -24,6 +24,20 @@ const (
 
 var ErrWriterClosed = errors.New("storage writer is closed")
 
+// ManifestObjectName is the object name a dataset manifest is stored
+// under, directly beneath a dataset's capture-ID prefix. Manifests are
+// JSON, not JSONL.gz, so capture readers must skip them when listing
+// data objects.
+const ManifestObjectName = "manifest.json"
+
+// ManifestWriter is implemented by writer factories that can store a
+// dataset manifest object alongside the capture data, under
+// "{captureID}/manifest.json" in the same layout the factory's writers
+// use. Factories without raw-object support simply don't implement it.
+type ManifestWriter interface {
+	PutManifest(ctx context.Context, captureID string, data []byte) error
+}
+
 type CapturedRequest struct {
 	ID            string              `json:"id"`
 	Timestamp     time.Time           `json:"timestamp"`
@@ -49,18 +63,18 @@ type WriterFactory interface {
 type Config interface{ isStorageConfig() }
 
 type ArtifactRecord struct {
-	CaptureID       string
+	CaptureID        string
 	CaptureNamespace string
-	CaptureName     string
-	StorageBackend  string
-	Bucket          string
-	Key             string
-	Region          string
-	ContentType     string
-	ContentEncoding string
-	SizeBytes       int64
-	SHA256          string
-	CreatedAt       time.Time
+	CaptureName      string
+	StorageBackend   string
+	Bucket           string
+	Key              string
+	Region           string
+	ContentType      string
+	ContentEncoding  string
+	SizeBytes        int64
+	SHA256           string
+	CreatedAt        time.Time
 }
 
 type ArtifactRecorder interface {

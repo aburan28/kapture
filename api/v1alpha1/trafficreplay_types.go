@@ -28,16 +28,23 @@ const (
 
 // TrafficCaptureReference references a TrafficCapture whose data should be replayed.
 type TrafficCaptureReference struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 
 // ReplayTarget defines the destination for replayed traffic.
 type ReplayTarget struct {
 	// Host is the target hostname or IP to replay traffic to.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`
 	Host string `json:"host"`
 
 	// Port is the target port. Defaults to 80 for HTTP, 443 for HTTPS.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port *int32 `json:"port,omitempty"`
 
 	// +optional
@@ -46,6 +53,9 @@ type ReplayTarget struct {
 }
 
 // ReplayRateConfig controls the pacing of replayed requests.
+//
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Constant' || has(self.requestsPerSecond)",message="requestsPerSecond is required when mode is Constant"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'OriginalTiming' || !has(self.timeScale)",message="timeScale only applies when mode is OriginalTiming"
 type ReplayRateConfig struct {
 	// Mode controls how replay requests are paced.
 	// +kubebuilder:default=Unlimited
@@ -59,10 +69,13 @@ type ReplayRateConfig struct {
 	// TimeScale multiplies original inter-request delays when Mode is
 	// OriginalTiming. 1.0 = real-time, 0.5 = 2x speed.
 	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
 	TimeScale *string `json:"timeScale,omitempty"`
 }
 
 // ReplayFilters narrows which captured requests are replayed.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.startTime) || !has(self.endTime) || self.startTime < self.endTime",message="startTime must be before endTime"
 type ReplayFilters struct {
 	// StartTime replays only requests captured at or after this time.
 	// +optional
@@ -78,6 +91,9 @@ type ReplayFilters struct {
 
 	// Methods filters to specific HTTP methods.
 	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=32
 	Methods []string `json:"methods,omitempty"`
 
 	// Limit caps the total number of requests to replay. Zero means unlimited.
@@ -91,6 +107,8 @@ type ReplayFilters struct {
 // whose hashed request ID modulo n equals i, so n workers with the same
 // count cover the capture exactly once. Used by distributed load tests to
 // fan a single capture out across many spokes.
+//
+// +kubebuilder:validation:XValidation:rule="self.index < self.count",message="shard index must be less than shard count"
 type ReplayShardSpec struct {
 	// Index of this shard, in [0, count).
 	// +kubebuilder:validation:Minimum=0
@@ -99,11 +117,57 @@ type ReplayShardSpec struct {
 	// Count is the total number of shards the capture is split into.
 	// +kubebuilder:validation:Minimum=1
 	Count int32 `json:"count"`
+
+	// Presharded indicates the capture was pre-partitioned with
+	// kapture-preshard into per-shard slices. The worker then reads only
+	// the slice "{captureID}/shards/{index}-of-{count}" with no shard
+	// filtering, cutting storage reads by a factor of count. The slice
+	// layout for the same count must exist, or the replay reads nothing.
+	// +optional
+	Presharded *bool `json:"presharded,omitempty"`
 }
 
 // LoadTestReference identifies the CaptureLoadTest a replay shard belongs to.
 type LoadTestReference struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
+}
+
+// ReplayEngineSpec selects and configures the replay engine that sends the
+// load. Engines other than "builtin" run as gRPC subprocess plugins
+// discovered from the replay worker's plugin directory
+// (kapture-engine-<name>); see docs/replay-engine-abi.md.
+type ReplayEngineSpec struct {
+	// Name of the engine: "builtin" (native HTTP sender, default), "k6",
+	// "ghz", or any installed plugin name.
+	// +optional
+	// +kubebuilder:default=builtin
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name,omitempty"`
+
+	// Config is engine-specific configuration, passed verbatim (JSON) to
+	// the engine's Configure call.
+	// +optional
+	Config *runtime.RawExtension `json:"config,omitempty"`
+}
+
+// ReplaySafety guards where replayed traffic may be sent. Replaying a
+// production capture at the production host by mistake is the worst
+// failure mode of a load-testing system; the allowlist makes the blast
+// radius an explicit, reviewable part of the spec.
+type ReplaySafety struct {
+	// AllowedHosts restricts the replay target. Patterns are exact
+	// hostnames ("staging-api.internal") or wildcard subdomains
+	// ("*.staging.internal"). Empty means no restriction (the policy is
+	// opt-in); once set, a target that matches no pattern is rejected
+	// before any traffic is generated.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:Pattern=`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`
+	// +kubebuilder:validation:items:MaxLength=253
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
 }
 
 // ReplayTransformRef references a named transformer plugin.
@@ -155,6 +219,14 @@ type TrafficReplaySpec struct {
 	// directive; user-created replays leave it unset.
 	// +optional
 	LoadTestRef *LoadTestReference `json:"loadTestRef,omitempty"`
+
+	// Engine selects the replay engine. Defaults to the builtin sender.
+	// +optional
+	Engine *ReplayEngineSpec `json:"engine,omitempty"`
+
+	// Safety guards where replayed traffic may be sent.
+	// +optional
+	Safety *ReplaySafety `json:"safety,omitempty"`
 }
 
 // TrafficReplayStatus defines the observed state of TrafficReplay.

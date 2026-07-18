@@ -27,15 +27,15 @@ type FilesystemReader struct {
 	mountPath string
 	log       *slog.Logger
 
-	files       []string
-	fileIndex   int
-	scanner     *bufio.Scanner
-	gzReader    *gzip.Reader
-	file        *os.File
-	opts        ReadOptions
-	opened      bool
-	closed      bool
-	totalRead   int64
+	files     []string
+	fileIndex int
+	scanner   *bufio.Scanner
+	gzReader  *gzip.Reader
+	file      *os.File
+	opts      ReadOptions
+	opened    bool
+	closed    bool
+	totalRead int64
 }
 
 // NewFilesystemReader creates a Reader that streams from a local filesystem path.
@@ -130,9 +130,23 @@ func (r *FilesystemReader) Close() error {
 	return nil
 }
 
-func (r *FilesystemReader) TotalRead() int64        { return r.totalRead }
-func (r *FilesystemReader) FileCount() int           { return len(r.files) }
-func (r *FilesystemReader) CurrentFileIndex() int    { return r.fileIndex }
+func (r *FilesystemReader) TotalRead() int64      { return r.totalRead }
+func (r *FilesystemReader) FileCount() int        { return len(r.files) }
+func (r *FilesystemReader) CurrentFileIndex() int { return r.fileIndex }
+
+// LoadManifest returns the dataset manifest for a capture, or (nil, nil)
+// when none exists.
+func (r *FilesystemReader) LoadManifest(_ context.Context, captureID string) ([]byte, error) {
+	path := filepath.Join(r.mountPath, captureID, storage.ManifestObjectName)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read manifest %q: %w", path, err)
+	}
+	return data, nil
+}
 
 func (r *FilesystemReader) listFiles(basePath string, opts ReadOptions) ([]string, error) {
 	var files []string
@@ -260,4 +274,3 @@ func seekTo(keys []string, resumeKey string) int {
 	}
 	return idx
 }
-

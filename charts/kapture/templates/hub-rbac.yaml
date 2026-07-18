@@ -27,9 +27,17 @@ rules:
   - apiGroups: ["capture.gateway.io"]
     resources: ["captureloadtests/finalizers"]
     verbs: ["update"]
+  # TLS certificate secrets referenced by CaptureHub spec.tls.certSecretRef.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Leader election when running more than one hub replica.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

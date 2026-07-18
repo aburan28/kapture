@@ -25,6 +25,9 @@ const (
 	LoadTestConditionSpokesAssigned = "SpokesAssigned"
 	// LoadTestConditionAborted records why a run was aborted.
 	LoadTestConditionAborted = "Aborted"
+	// LoadTestConditionTargetAllowed indicates whether the replay target
+	// passed the safety allowlist.
+	LoadTestConditionTargetAllowed = "TargetAllowed"
 )
 
 // LoadTestDistribution controls how replay work is fanned out across the
@@ -33,6 +36,9 @@ type LoadTestDistribution struct {
 	// Cells restricts the load test to spokes registered in these cells.
 	// Empty means all connected spokes are eligible.
 	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=63
 	Cells []string `json:"cells,omitempty"`
 
 	// MaxSpokes caps how many spokes participate. Zero or unset means all
@@ -54,6 +60,15 @@ type LoadTestDistribution struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=10
 	ConcurrencyPerWorker *int32 `json:"concurrencyPerWorker,omitempty"`
+
+	// Presharded indicates the source capture was pre-partitioned with
+	// kapture-preshard into exactly totalShards slices (participating
+	// spokes × workersPerSpoke). Each worker then reads only its own
+	// slice, cutting aggregate storage reads by a factor of the shard
+	// count. Combine with maxSpokes to pin the shard count to the
+	// presharded layout.
+	// +optional
+	Presharded *bool `json:"presharded,omitempty"`
 }
 
 // LoadTestAbortPolicy defines conditions under which the hub aborts an
@@ -112,6 +127,17 @@ type CaptureLoadTestSpec struct {
 	// Abort defines in-flight safety limits.
 	// +optional
 	Abort *LoadTestAbortPolicy `json:"abort,omitempty"`
+
+	// Engine selects the replay engine every shard runs (builtin, k6,
+	// ghz, or an installed plugin). Defaults to the builtin sender.
+	// +optional
+	Engine *ReplayEngineSpec `json:"engine,omitempty"`
+
+	// Safety guards where replayed traffic may be sent. Enforced by the
+	// hub before any shard is distributed, and again by every spoke
+	// before running a shard.
+	// +optional
+	Safety *ReplaySafety `json:"safety,omitempty"`
 }
 
 // LoadTestCellStatus aggregates progress for one cell.

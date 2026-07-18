@@ -56,12 +56,14 @@ jobs:
           docker build -f Dockerfile.hub -t kapture/hub:e2e .
           docker build -f Dockerfile.spoke -t kapture/spoke:e2e .
           docker build -f Dockerfile.agent -t kapture/agent:e2e .
+          docker build -f Dockerfile.replay -t kapture/replay-engine:e2e .
 
       - name: Load images into Kind
         run: |
           kind load docker-image kapture/hub:e2e --name kapture-e2e
           kind load docker-image kapture/spoke:e2e --name kapture-e2e
           kind load docker-image kapture/agent:e2e --name kapture-e2e
+          kind load docker-image kapture/replay-engine:e2e --name kapture-e2e
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -82,7 +84,10 @@ jobs:
             --set agent.image.repository=kapture/agent \
             --set agent.image.tag=e2e \
             --set agent.image.pullPolicy=Never \
+            --set replayEngine.image.repository=kapture/replay-engine \
+            --set replayEngine.image.tag=e2e \
             --set spoke.hub.address=kapture-hub.capture-system.svc:9443 \
+            --set spoke.cell=cell-e2e \
             --wait \
             --timeout 180s
 
@@ -93,13 +98,45 @@ jobs:
           echo "Controllers ready:"
           kubectl -n capture-system get pods
 
+      - name: Start hub gRPC server and register spoke
+        run: |
+          # The CaptureHub CR starts the hub's gRPC server. The spoke only
+          # attempts hub registration at startup, so restart it once the
+          # server is up.
+          cat <<EOF | kubectl apply -f -
+          apiVersion: capture.gateway.io/v1alpha1
+          kind: CaptureHub
+          metadata:
+            name: e2e-loadtest-hub
+          spec:
+            grpcAddress: ":9443"
+          EOF
+          sleep 10
+          kubectl -n capture-system rollout restart deployment/kapture-spoke
+          kubectl -n capture-system rollout status deployment/kapture-spoke --timeout=120s
+
+          echo "Waiting for spoke to register with hub..."
+          for i in $(seq 1 30); do
+            CONNECTED=$(kubectl get capturehub e2e-loadtest-hub -o jsonpath='{.status.connectedSpokes}' 2>/dev/null || echo 0)
+            if [ "${CONNECTED:-0}" -ge 1 ]; then
+              echo "spoke registered (connectedSpokes=$CONNECTED)"
+              break
+            fi
+            sleep 5
+          done
+          kubectl get capturehub e2e-loadtest-hub -o yaml
+
       - name: Run e2e tests
+        env:
+          E2E_CAPTUREHUB_NAME: e2e-loadtest-hub
+          E2E_SPOKE_CELL: cell-e2e
+          E2E_AGENT_IMAGE: kapture/agent:e2e
         run: |
           # The agent health test relies on Deployment readiness/ClusterIP access
           # from an out-of-cluster runner and cleans up its namespace before the
           # workflow can collect diagnostics. Keep the controller lifecycle e2e
           # suite running here until that test is rewritten to use pod proxying.
-          go test ./test/e2e/... -v -timeout 600s -count=1 -skip '^TestCaptureAgentHealthEndpoint$'
+          go test ./test/e2e/... -v -timeout 1200s -count=1 -skip '^TestCaptureAgentHealthEndpoint$'
 
       - name: Collect debug info on failure
         if: failure()
@@ -127,6 +164,18 @@ jobs:
           echo ""
           echo "=== CaptureHubs ==="
           kubectl get capturehubs -o yaml || true
+          echo ""
+          echo "=== CaptureLoadTests ==="
+          kubectl get captureloadtests --all-namespaces -o yaml || true
+          echo ""
+          echo "=== TrafficReplays ==="
+          kubectl get trafficreplays --all-namespaces -o yaml || true
+          echo ""
+          echo "=== Replay Jobs ==="
+          kubectl get jobs --all-namespaces -o wide || true
+          echo ""
+          echo "=== Replay worker logs ==="
+          kubectl logs --all-namespaces -l app.kubernetes.io/component=replay-worker --tail=100 || true
           echo ""
           echo "=== Deployments ==="
           kubectl get deployments --all-namespaces -o wide

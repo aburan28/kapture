@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,6 +20,7 @@ import (
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	"github.com/kapture-io/kapture/internal/plugin/replay"
+	"github.com/kapture-io/kapture/internal/safety"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
 )
 
@@ -32,6 +34,15 @@ type TrafficReplayReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	HubClient *HubClient // optional: nil when running in standalone mode
+	// Recorder emits Kubernetes Events on replay transitions. Optional.
+	Recorder record.EventRecorder
+}
+
+// event emits a Kubernetes Event when a recorder is configured.
+func (r *TrafficReplayReconciler) event(tr *capturev1alpha1.TrafficReplay, eventType, reason, messageFmt string, args ...any) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(tr, eventType, reason, messageFmt, args...)
+	}
 }
 
 // +kubebuilder:rbac:groups=capture.gateway.io,resources=trafficreplays,verbs=get;list;watch;create;update;patch;delete
@@ -73,6 +84,19 @@ func (r *TrafficReplayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	// Target safety gate (defense in depth: the hub already checked the
+	// load-test target, but user-created replays and stale directives are
+	// checked here before any worker exists).
+	if tr.Spec.Safety != nil && !safety.HostAllowed(tr.Spec.Target.Host, tr.Spec.Safety.AllowedHosts) {
+		logger.Info("replay target denied by safety allowlist",
+			"target", tr.Spec.Target.Host, "allowedHosts", tr.Spec.Safety.AllowedHosts)
+		r.event(tr, corev1.EventTypeWarning, "TargetDenied",
+			"target host %q matches no pattern in spec.safety.allowedHosts", tr.Spec.Target.Host)
+		return r.setPhase(ctx, tr, capturev1alpha1.TrafficReplayPhaseFailed,
+			"TargetDenied", fmt.Sprintf("target host %q matches no pattern in spec.safety.allowedHosts %v",
+				tr.Spec.Target.Host, tr.Spec.Safety.AllowedHosts))
+	}
+
 	// Resolve the storage backend the replay reads from.
 	storage := &capturev1alpha1.CaptureStorage{}
 	storageKey := types.NamespacedName{Namespace: tr.Namespace, Name: string(tr.Spec.StorageRef.Name)}
@@ -102,6 +126,7 @@ func (r *TrafficReplayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, fmt.Errorf("create replay Job: %w", err)
 		}
 		logger.Info("created replay job", "job", jobKey)
+		r.event(tr, corev1.EventTypeNormal, "JobCreated", "replay job %s created", jobKey.Name)
 		return r.setPhase(ctx, tr, capturev1alpha1.TrafficReplayPhasePending,
 			"JobCreated", "replay job created")
 	}
@@ -114,6 +139,10 @@ func (r *TrafficReplayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	case job.Status.Succeeded > 0:
 		report := r.scrapeRunReport(ctx, job)
 		r.applyReport(tr, report)
+		if tr.Status.Phase != capturev1alpha1.TrafficReplayPhaseCompleted {
+			r.event(tr, corev1.EventTypeNormal, "Completed",
+				"replay finished: %d sent, %d failed", tr.Status.SentRequests, tr.Status.FailedRequests)
+		}
 		now := metav1.Now()
 		tr.Status.Phase = capturev1alpha1.TrafficReplayPhaseCompleted
 		tr.Status.CompletionTime = &now
@@ -127,6 +156,9 @@ func (r *TrafficReplayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	case jobFailed(job):
 		report := r.scrapeRunReport(ctx, job)
 		r.applyReport(tr, report)
+		if tr.Status.Phase != capturev1alpha1.TrafficReplayPhaseFailed {
+			r.event(tr, corev1.EventTypeWarning, "Failed", "%s", jobFailureMessage(job))
+		}
 		now := metav1.Now()
 		tr.Status.Phase = capturev1alpha1.TrafficReplayPhaseFailed
 		tr.Status.CompletionTime = &now

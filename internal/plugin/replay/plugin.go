@@ -56,6 +56,14 @@ type Reader interface {
 	Close() error
 }
 
+// ManifestLoader is implemented by readers that can fetch the dataset
+// manifest ("{captureID}/manifest.json") for a capture. Returns
+// (nil, nil) when no manifest exists — raw multi-writer captures have
+// none, only single-writer pipelines like preshard publish them.
+type ManifestLoader interface {
+	LoadManifest(ctx context.Context, captureID string) ([]byte, error)
+}
+
 // ReadOptions configures what data a Reader should load.
 type ReadOptions struct {
 	// CaptureID identifies the capture session to replay (e.g., "namespace/name").
@@ -152,21 +160,21 @@ type ResultHandler interface {
 
 // Summary aggregates replay results for reporting.
 type Summary struct {
-	TotalRequests   int64
-	SuccessCount    int64
-	ErrorCount      int64
-	FilteredCount   int64
-	MeanLatency     time.Duration
-	P50Latency      time.Duration
-	P95Latency      time.Duration
-	P99Latency      time.Duration
-	StatusCodeDist  map[int]int64
-	StartTime       time.Time
-	EndTime         time.Time
-	TotalDuration   time.Duration
-	BytesSent       int64
-	BytesReceived   int64
-	ErrorsByType    map[string]int64
+	TotalRequests  int64
+	SuccessCount   int64
+	ErrorCount     int64
+	FilteredCount  int64
+	MeanLatency    time.Duration
+	P50Latency     time.Duration
+	P95Latency     time.Duration
+	P99Latency     time.Duration
+	StatusCodeDist map[int]int64
+	StartTime      time.Time
+	EndTime        time.Time
+	TotalDuration  time.Duration
+	BytesSent      int64
+	BytesReceived  int64
+	ErrorsByType   map[string]int64
 }
 
 // Registry is a named collection of plugin constructors for replay components.

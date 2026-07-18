@@ -52,10 +52,27 @@ type CaptureSettings struct {
 	// +kubebuilder:validation:Minimum=0
 	MaxBodyBytes *int64 `json:"maxBodyBytes,omitempty"`
 	// +optional
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
 	Duration *string `json:"duration,omitempty"`
+
+	// RedactHeaders lists additional headers whose values are replaced
+	// with "[REDACTED]" before captured requests are stored, on top of the
+	// default credential set (Authorization, Proxy-Authorization, Cookie,
+	// Set-Cookie, X-Api-Key, X-Auth-Token).
+	// +optional
+	RedactHeaders []string `json:"redactHeaders,omitempty"`
+
+	// DisableHeaderRedaction turns off ALL header redaction, including the
+	// default credential set. Captured credentials then become durable
+	// storage data and are re-sent verbatim on replay — only use this when
+	// the capture pipeline and storage are trusted with live secrets.
+	// +optional
+	DisableHeaderRedaction *bool `json:"disableHeaderRedaction,omitempty"`
 }
 
 // AgentScalingSpec configures capture agent scaling.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || !has(self.maxReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must not exceed maxReplicas"
 type AgentScalingSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0

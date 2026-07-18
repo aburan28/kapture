@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -52,6 +54,25 @@ func NewS3WriterFactory(ctx context.Context, cfg S3Config) (*S3WriterFactory, er
 		cfg.Client = awss3.NewFromConfig(awsCfg)
 	}
 	return &S3WriterFactory{config: cfg}, nil
+}
+
+// PutManifest stores the dataset manifest for a capture under
+// "{prefix}/{captureID}/manifest.json".
+func (f *S3WriterFactory) PutManifest(ctx context.Context, captureID string, data []byte) error {
+	if captureID == "" {
+		return fmt.Errorf("capture ID is required")
+	}
+	key := path.Join(strings.Trim(f.config.Prefix, "/"), captureID, ManifestObjectName)
+	_, err := f.config.Client.PutObject(ctx, &awss3.PutObjectInput{
+		Bucket:      aws.String(f.config.Bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return fmt.Errorf("put s3 manifest %q: %w", key, err)
+	}
+	return nil
 }
 
 func (f *S3WriterFactory) NewWriter(_ context.Context, captureID string) (Writer, error) {

@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/", label: "Dashboard", icon: DashboardIcon },
   { href: "/captures", label: "Captures", icon: CaptureIcon },
+  { href: "/loadtests", label: "Load Tests", icon: LoadTestIcon },
+  { href: "/replays", label: "Replays", icon: ReplayIcon },
   { href: "/spokes", label: "Spokes", icon: SpokeIcon },
   { href: "/storage", label: "Storage", icon: StorageIcon },
 ];
@@ -122,6 +124,42 @@ function StorageIcon({ active }: { active: boolean }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"
+      />
+    </svg>
+  );
+}
+
+function LoadTestIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 ${active ? "text-indigo-400" : "text-gray-500"}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 13.5 8.25 9l3 3 5.25-5.25M16.5 6.75h4.5v4.5M3.75 20.25h16.5"
+      />
+    </svg>
+  );
+}
+
+function ReplayIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 ${active ? "text-indigo-400" : "text-gray-500"}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 9.75 14.25 12m0 0L12 14.25M14.25 12H4.5m4.664-6.876A8.25 8.25 0 1 1 5.25 12"
       />
     </svg>
   );

@@ -35,12 +35,18 @@ internal/
   spoke/               # Spoke controller, mirror injection, agent deployer, hub client
   agent/               # HTTP/gRPC capture handler, buffered writer, server
   storage/             # Storage backends (s3, gcs, efs, ebs, plugin) + factory
-proto/hub/v1/          # Protobuf definitions and generated gRPC stubs
+  replayengine/        # Engine plugin host: subprocess launch, hot reload, streaming feeder
+  engines/             # OOTB engine implementations (builtin, k6, ghz)
+pkg/replayengine/      # Public SDK for replay engine plugin authors (Serve + ABI)
+cmd/engines/           # Plugin binaries: kapture-engine-{builtin,k6,ghz}
+proto/hub/v1/          # Hub-spoke protobuf definitions and generated gRPC stubs
+proto/replayengine/v1/ # Replay engine ABI (see docs/replay-engine-abi.md)
 config/crd/bases/      # Generated CRD YAML manifests
 charts/kapture/        # Helm chart (templates, values, CRDs, unit tests)
 test/
   integration/         # envtest-based integration tests
-  e2e/                 # Kind cluster end-to-end tests
+  e2e/                 # Kind cluster end-to-end tests (incl. load-test sharding)
+verification/tla/      # TLA+ specs model-checked by TLC in CI
 ui/                    # Next.js web dashboard (React 19, Tailwind CSS)
 .github/workflows/     # CI (ci.yaml) and E2E (e2e.yaml) pipelines
 ```
@@ -76,8 +82,13 @@ go test ./test/integration/... -v -race -timeout 300s
 # Helm unit tests
 helm unittest charts/kapture
 
-# E2E tests (requires Kind cluster with Gateway API CRDs)
+# E2E tests (requires Kind cluster with Gateway API CRDs; the load-test
+# e2e tests additionally need the hub-spoke wiring from .github/workflows/e2e.yaml
+# and skip themselves when the e2e CaptureHub CR is absent)
 go test ./test/e2e/... -v -timeout 30m
+
+# TLA+ model checking (requires java; downloads tla2tools.jar)
+make verify-tla
 
 # UI tests
 cd ui && npm test
@@ -148,6 +159,12 @@ E2E pipeline in `.github/workflows/e2e.yaml` deploys to a Kind cluster.
 | `internal/hub/loadtest_controller.go` | CaptureLoadTest coordinator (shard fan-out across cells) |
 | `internal/storage/interface.go` | Storage Writer interface definition |
 | `internal/storage/factory.go` | Storage backend factory |
+| `internal/dataset/preshard.go` | Pre-shards captures into per-worker slices (via `cmd/kapture-preshard`) |
+| `internal/spoke/orphan_gc.go` | Deletes shards whose CaptureLoadTest vanished (lost-STOP backstop) |
+| `proto/replayengine/v1/replayengine.proto` | Replay engine ABI wire contract |
+| `pkg/replayengine/` | Engine plugin SDK (implement Engine, call Serve) |
+| `internal/replayengine/` | Engine host: subprocess launch, hot reload, streaming feeder |
+| `docs/replay-engine-abi.md` | Full ABI spec: handshake, versioning, conformance |
 | `charts/kapture/values.yaml` | Helm chart default values |
 | `config/crd/bases/*.yaml` | Generated CRD manifests - regenerate after API changes |
 

@@ -26,11 +26,14 @@ func main() {
 	var metricsAddr string
 	var healthProbeAddr string
 	var enableLeaderElection bool
+	var directiveBufferSize int
 
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&healthProbeAddr, "health-probe-addr", ":8081", "The address the health probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager, ensuring only one active controller.")
+	flag.IntVar(&directiveBufferSize, "directive-buffer-size", 0,
+		"Per-spoke directive queue size (0 = default); raise for large shard fan-outs per spoke.")
 	flag.Parse()
 
 	logger := zap.New(zap.UseDevMode(true))
@@ -49,8 +52,9 @@ func main() {
 	}
 
 	hubReconciler := &hub.CaptureHubReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("CaptureHub"),
+		Client:              mgr.GetClient(),
+		Log:                 ctrl.Log.WithName("controllers").WithName("CaptureHub"),
+		DirectiveBufferSize: directiveBufferSize,
 	}
 	if err := hubReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CaptureHub")
@@ -60,6 +64,7 @@ func main() {
 	if err := (&hub.CaptureLoadTestReconciler{
 		Client:         mgr.GetClient(),
 		Log:            ctrl.Log.WithName("controllers").WithName("CaptureLoadTest"),
+		Recorder:       mgr.GetEventRecorderFor("kapture-loadtest"),
 		ServerProvider: hubReconciler.GetServer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CaptureLoadTest")

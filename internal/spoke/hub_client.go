@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -43,6 +44,11 @@ type HubClient struct {
 	// in each heartbeat. This keeps the hub's load test view fresh even if
 	// individual ReportReplayStatus calls were lost.
 	ReplaySummaries func(ctx context.Context) []*hubv1.ReplayStatusSummary
+
+	// OnActiveLoadTests receives the hub's authoritative CaptureLoadTest
+	// list from each heartbeat response. Called only when the hub marked
+	// the list complete.
+	OnActiveLoadTests func(ctx context.Context, keys []*hubv1.LoadTestKey)
 }
 
 // HubClientConfig holds configuration for the HubClient.
@@ -176,12 +182,18 @@ func (c *HubClient) sendHeartbeat(ctx context.Context) {
 		req.ReplaySummaries = c.ReplaySummaries(ctx)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	if _, err := client.Heartbeat(ctx, req); err != nil {
+	resp, err := client.Heartbeat(rpcCtx, req)
+	if err != nil {
+		metricHubRPCErrors.WithLabelValues("Heartbeat").Inc()
 		c.log.Error(err, "heartbeat failed")
 		return
+	}
+
+	if resp.ActiveLoadTestsComplete && c.OnActiveLoadTests != nil {
+		c.OnActiveLoadTests(ctx, resp.ActiveLoadTests)
 	}
 }
 
@@ -203,6 +215,7 @@ func (c *HubClient) ReportStatus(ctx context.Context, statuses []*hubv1.CaptureS
 		Statuses: statuses,
 	})
 	if err != nil {
+		metricHubRPCErrors.WithLabelValues("ReportCaptureStatus").Inc()
 		return fmt.Errorf("reporting status: %w", err)
 	}
 	return nil
@@ -226,6 +239,7 @@ func (c *HubClient) ReportReplayStatus(ctx context.Context, statuses []*hubv1.Re
 		Statuses: statuses,
 	})
 	if err != nil {
+		metricHubRPCErrors.WithLabelValues("ReportReplayStatus").Inc()
 		return fmt.Errorf("reporting replay status: %w", err)
 	}
 	return nil
@@ -248,6 +262,13 @@ func (c *HubClient) WatchDirectives(ctx context.Context) {
 func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{}) {
 	backoff := time.Second
 
+	// Jittered sleep: after a hub restart every spoke in the fleet sees
+	// its stream close at the same instant, and synchronized retries
+	// would stampede the hub in lockstep waves.
+	sleep := func(d time.Duration) {
+		time.Sleep(d/2 + rand.N(d))
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -262,7 +283,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 		spokeID := c.spokeID
 		c.mu.RUnlock()
 		if client == nil {
-			time.Sleep(backoff)
+			sleep(backoff)
 			continue
 		}
 
@@ -270,8 +291,9 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 			SpokeId: spokeID,
 		})
 		if err != nil {
+			metricHubRPCErrors.WithLabelValues("WatchDirectives").Inc()
 			c.log.Error(err, "opening directive stream", "backoff", backoff)
-			time.Sleep(backoff)
+			sleep(backoff)
 			backoff = min(backoff*2, 60*time.Second)
 			continue
 		}

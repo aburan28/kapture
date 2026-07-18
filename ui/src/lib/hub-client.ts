@@ -31,12 +31,18 @@ import {
   Spoke,
   CapturedRequest,
   CapturePhase,
+  CaptureLoadTest,
+  TrafficReplay,
+  Cell,
 } from "./types";
 import {
   mockCaptures,
   mockStorages,
   mockSpokes,
   mockCapturedRequests,
+  mockLoadTests,
+  mockReplays,
+  mockCells,
 } from "./mock-data";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +130,63 @@ export async function getCapturedRequests(
   }
 
   throw new Error("Storage read-back not yet implemented");
+}
+
+export interface ListReplaysOpts {
+  loadTest?: string;
+  namespace?: string;
+}
+
+// listReplays proxies the hub's ListReplays gRPC call (replay shards
+// aggregated from spoke reports across the fleet).
+export async function listReplays(
+  opts: ListReplaysOpts = {}
+): Promise<TrafficReplay[]> {
+  if (useMock()) {
+    let replays = mockReplays;
+    if (opts.loadTest) {
+      replays = replays.filter((r) => r.spec.loadTestRef?.name === opts.loadTest);
+    }
+    if (opts.namespace) {
+      replays = replays.filter((r) => r.namespace === opts.namespace);
+    }
+    return replays;
+  }
+
+  throw new Error("gRPC transport not yet implemented");
+}
+
+// listLoadTests reads CaptureLoadTest resources from the hub cluster.
+export async function listLoadTests(): Promise<CaptureLoadTest[]> {
+  if (useMock()) {
+    return mockLoadTests;
+  }
+
+  throw new Error("gRPC transport not yet implemented");
+}
+
+export async function getLoadTest(
+  name: string,
+  namespace?: string
+): Promise<CaptureLoadTest | null> {
+  if (useMock()) {
+    return (
+      mockLoadTests.find(
+        (lt) => lt.name === name && (!namespace || lt.namespace === namespace)
+      ) ?? null
+    );
+  }
+
+  throw new Error("gRPC transport not yet implemented");
+}
+
+// listCells proxies the hub's ListCells gRPC call.
+export async function listCells(): Promise<Cell[]> {
+  if (useMock()) {
+    return mockCells;
+  }
+
+  throw new Error("gRPC transport not yet implemented");
 }
 
 // ---------------------------------------------------------------------------

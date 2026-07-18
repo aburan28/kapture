@@ -110,6 +110,18 @@ Rate behaviour per mode:
   QPS — including bursts. `timeScale` speeds up or slows down every shard.
 - **Unlimited**: every shard sends as fast as the target accepts.
 
+### Replay engines
+
+Each shard runs a replay engine. The default `builtin` engine is the
+native byte-exact HTTP sender; `spec.engine` selects an alternative that
+runs as a gRPC subprocess plugin on the replay worker — `k6` and `ghz`
+ship out of the box, and any binary implementing the engine ABI plugs in
+the same way (including hot reload of plugin binaries without restarting
+workers). Engines receive an already-sharded, already-paced request
+stream; they never touch storage. See
+[replay-engine-abi.md](replay-engine-abi.md) for the contract, the OOTB
+engine matrix, and packaging.
+
 ### On the spoke
 
 Each START directive is materialised as a `TrafficReplay` resource named
@@ -178,15 +190,134 @@ heartbeats repopulate them within one interval, and the recorded
 `status.assignments` on the CaptureLoadTest let the coordinator re-send
 directives idempotently.
 
+Heartbeat responses also carry the hub's authoritative CaptureLoadTest
+list: spokes garbage-collect local shards whose load test no longer exists
+(`internal/spoke/orphan_gc.go`), so even a STOP directive lost in a hub
+crash window cannot leave orphaned load generators running. This is the
+`OrphanGC` action in the TLA+ model.
+
+## Verification
+
+Two layers of machine-checked verification back the sharding and
+coordination claims above:
+
+- **TLA+ model checking** (`verification/tla/`, run by
+  `.github/workflows/tla.yaml` and `make verify-tla`): `Sharding.tla`
+  checks that shard slices are disjoint and exhaustive for *every*
+  possible hash assignment, including across Job retries;
+  `KaptureLoadTest.tla` checks the hub-spoke coordination protocol under
+  full directive buffers, duplicate directive resends, shard failures,
+  and a hub restart — including that deletion and abort can never orphan
+  running shards. See `verification/tla/README.md` for the property
+  catalogue and the explicit modelling assumptions.
+- **End-to-end tests** (`test/e2e/loadtest_test.go`, run by the e2e
+  workflow against a Kind cluster): a real `CaptureLoadTest` fans out
+  across shards on a cell-registered spoke, replaying a seeded capture
+  against a counting sink. The sink's request counter must equal the
+  seeded request count exactly — a duplicate shard slice would push it
+  over, a dropped slice under — and per-shard sent counts must sum to the
+  same total. The suite also covers cell targeting, `Pending` behaviour
+  for empty cells, and shard cleanup on deletion.
+
 ## Sizing guidance
 
 - One replay worker (shard) with `concurrencyPerWorker: 50` sustains roughly
   1-5k RPS for small-body HTTP traffic, dominated by target latency; use
   `workersPerSpoke` to add parallel readers on large spokes.
-- Every worker streams and decompresses the **full** capture and skips
-  requests owned by other shards, so worker count multiplies storage read
-  bandwidth: budget `shards × compressed-capture-size` of object-store
-  egress per run. The dataset/bundle format in the design doc removes this
-  cost later.
+- By default every worker streams and decompresses the **full** capture
+  and skips requests owned by other shards, so worker count multiplies
+  storage read bandwidth: budget `shards × compressed-capture-size` of
+  object-store egress per run. **Preshard large captures to remove this
+  cost** (next section).
 - Prefer more spokes over more workers per spoke when the target is remote:
   cells spread source load and avoid a single egress bottleneck.
+
+## Pre-sharded captures
+
+For large captures, run `kapture-preshard` once before the load test to
+re-partition the capture into per-shard slices using the same FNV-1a
+assignment the runtime filter uses:
+
+```bash
+# ships at /kapture-preshard in the replay-engine image; run as a Job
+kapture-preshard \
+  --storage-type s3 --bucket my-captures --region us-east-1 \
+  --capture-id prod/orders --shards 32
+```
+
+This writes `{captureID}/shards/{i}-of-{n}/...` slices in the standard
+capture layout (single streaming pass, any storage backend). Then set:
+
+```yaml
+spec:
+  distribution:
+    presharded: true      # workers read only their own slice
+    maxSpokes: 8
+    workersPerSpoke: 4    # spokes × workers must equal --shards (32)
+```
+
+Each worker now reads `1/n` of the capture with no hash filtering —
+aggregate storage egress drops from `n × capture-size` to `1 ×
+capture-size`. The slice/filter equivalence (a request lands in slice `i`
+iff the runtime filter would keep it on shard `i`) is enforced by both
+using `replay.ShardOwns`, and covered by a round-trip test through real
+storage writers and readers.
+
+## Securing the hub-spoke channel (mTLS)
+
+The hub gRPC server takes its certificates from the CaptureHub CR:
+
+```yaml
+apiVersion: capture.gateway.io/v1alpha1
+kind: CaptureHub
+metadata:
+  name: global-hub
+spec:
+  grpcAddress: ":9443"
+  tls:
+    certSecretRef:
+      name: hub-tls          # tls.crt/tls.key + ca.crt (client CA)
+  authentication:
+    type: mTLS               # spokes must present certs signed by ca.crt
+```
+
+Spokes mount their client certificate secret via Helm:
+
+```bash
+--set spoke.hub.tls.secretName=spoke-hub-tls \
+--set spoke.hub.tls.serverName=kapture-hub.capture-system.svc
+```
+
+Without `authentication.type: mTLS` the hub serves TLS without requiring
+client certificates. Certificate rotation currently requires changing the
+secret name (or restarting the hub); in-place rotation is future work.
+
+With mTLS enabled, the hub also **binds spoke identity to the
+certificate**: a spoke may only register, heartbeat, watch directives, or
+report status as the `spoke_id` matching its client certificate's
+CommonName or a DNS SAN. Issue one certificate per spoke with the spoke
+name as CN — a shared fleet certificate would let any spoke impersonate
+any other.
+
+## Target safety and credential handling
+
+- **Target allowlist**: set `spec.safety.allowedHosts` on a
+  CaptureLoadTest (or TrafficReplay) to fence where replayed traffic may
+  go — exact hostnames or `*.subdomain` wildcards. The hub fails the load
+  test with a `TargetAllowed: False` condition before distributing any
+  shard, and every spoke re-checks before creating a worker Job. This is
+  the guard against pointing recorded production traffic back at
+  production.
+- **Credential redaction**: capture agents replace the values of
+  credential headers (Authorization, Proxy-Authorization, Cookie,
+  Set-Cookie, X-Api-Key, X-Auth-Token) with `[REDACTED]` before requests
+  become durable capture data. Add more via
+  `spec.capture.redactHeaders`; opt out (trusted pipelines only) with
+  `spec.capture.disableHeaderRedaction: true`. Replays inject fresh
+  credentials via engine header overrides instead of resending recorded
+  ones.
+- **Empty-replay preflight**: replay workers fail (instead of completing
+  with zero requests) when the capture ID resolves to no data — the
+  usual causes are a typo or a `presharded: true` run whose slice layout
+  was never built with `kapture-preshard`. Override with
+  `--fail-on-empty=false` for intentionally-empty replays.

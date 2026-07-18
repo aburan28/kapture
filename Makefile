@@ -18,6 +18,18 @@ generate-crds:
 build:
 	go build ./...
 
+# Build the OOTB replay engine plugin binaries into ./bin. Deploy them to
+# the replay worker's plugin directory (replayEngine.pluginDir) to enable
+# --engine k6 / --engine ghz.
+.PHONY: build-engines
+build-engines:
+	mkdir -p bin
+	go build -o bin/kapture-engine-builtin ./cmd/engines/builtin
+	go build -o bin/kapture-engine-k6 ./cmd/engines/k6
+	go build -o bin/kapture-engine-ghz ./cmd/engines/ghz
+	go build -o bin/kapture-preshard ./cmd/kapture-preshard
+	go build -o bin/plugin-installer ./cmd/plugin-installer
+
 test:
 	go test ./...
 
@@ -33,3 +45,7 @@ docker-build:
 
 lint:
 	@echo "TODO: run golangci-lint once packages are implemented"
+
+.PHONY: verify-tla
+verify-tla:
+	./hack/verify-tla.sh

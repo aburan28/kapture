@@ -6,6 +6,14 @@ A Kubernetes traffic capture controller that uses **Gateway API RequestMirror fi
 
 Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes by injecting `RequestMirror` filters that duplicate requests to capture agent pods. Captured data is written to pluggable storage backends (S3, GCS, EFS, EBS) in compressed JSONL format.
 
+**Documentation:**
+[Quickstart](docs/quickstart.md) ·
+[CRD Reference](docs/crd-reference.md) ·
+[Troubleshooting](docs/troubleshooting.md) ·
+[Multi-Cell Load Testing](docs/multi-cell-load-testing.md) ·
+[Replay Engine ABI](docs/replay-engine-abi.md) ·
+[TLS & Rotation](docs/tls-rotation.md)
+
 ### Key Features
 
 - **Non-invasive capture** via Gateway API RequestMirror -- no sidecars, no code changes
@@ -215,6 +223,25 @@ spec:
   rate:
     mode: OriginalTiming    # Constant | OriginalTiming | Unlimited
   concurrency: 50
+```
+
+### Replay engines
+
+Replays and load tests run through pluggable **replay engines** behind a
+versioned gRPC ABI ([docs/replay-engine-abi.md](docs/replay-engine-abi.md)).
+The `builtin` engine (byte-exact HTTP sender) is the default; `k6` and
+`ghz` adapters ship out of the box (`make build-engines`), and third-party
+engines plug in as `kapture-engine-<name>` subprocess binaries with hot
+reload. Kapture streams already-sharded, already-paced requests to the
+engine — engines never touch storage, and captures are never downloaded
+wholesale. Select per replay or load test:
+
+```yaml
+spec:
+  engine:
+    name: k6
+    config:
+      vus: 200
 ```
 
 ### CaptureLoadTest (namespaced, hub cluster)

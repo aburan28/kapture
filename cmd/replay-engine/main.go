@@ -27,14 +27,19 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kapture-io/kapture/internal/dataset"
 	"github.com/kapture-io/kapture/internal/plugin/replay"
+	hostengine "github.com/kapture-io/kapture/internal/replayengine"
+	replayenginev1 "github.com/kapture-io/kapture/proto/replayengine/v1"
 )
 
 type config struct {
@@ -69,6 +74,11 @@ type config struct {
 	shardIndex    int
 	shardCount    int
 
+	// External engine plugins
+	engine       string
+	engineConfig string
+	pluginDir    string
+
 	// Checkpoint
 	checkpointDir string
 	replayID      string
@@ -78,6 +88,9 @@ type config struct {
 	logLevel    string
 	logFormat   string
 	summaryPath string
+
+	// Safety
+	failOnEmpty bool
 }
 
 func main() {
@@ -128,6 +141,11 @@ func parseFlags() config {
 	flag.IntVar(&cfg.shardIndex, "shard-index", 0, "Shard index for distributed replay (with --shard-count)")
 	flag.IntVar(&cfg.shardCount, "shard-count", 1, "Total shards for distributed replay (1=no sharding)")
 
+	// External engine plugin flags.
+	flag.StringVar(&cfg.engine, "engine", "builtin", "Replay engine: builtin, or a plugin name (k6, ghz, ...)")
+	flag.StringVar(&cfg.engineConfig, "engine-config", "", "Engine-specific configuration (JSON)")
+	flag.StringVar(&cfg.pluginDir, "plugin-dir", envOrDefault("REPLAY_PLUGIN_DIR", "/plugins"), "Directory containing kapture-engine-<name> plugin binaries")
+
 	// Checkpoint flags.
 	flag.StringVar(&cfg.checkpointDir, "checkpoint-dir", "/tmp/kapture-checkpoints", "Checkpoint directory")
 	flag.StringVar(&cfg.replayID, "replay-id", "", "Replay session ID (required with --resume, auto-generated otherwise)")
@@ -137,6 +155,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.StringVar(&cfg.logFormat, "log-format", "text", "Log format: text, json")
 	flag.StringVar(&cfg.summaryPath, "summary-path", "", "Write a JSON run report to this file on completion (e.g. /dev/termination-log)")
+	flag.BoolVar(&cfg.failOnEmpty, "fail-on-empty", true, "Fail when no captured requests exist for --capture-id (catches typos and missing preshard layouts)")
 
 	flag.Parse()
 	return cfg
@@ -180,13 +199,187 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 	}
 	defer reader.Close()
 
+	// Manifest preflight: verify the dataset before streaming anything.
+	// Presharded slices publish manifests; raw captures may have none.
+	if err := manifestPreflight(ctx, reader, cfg, logger); err != nil {
+		return err
+	}
+
 	// Feed server mode: start HTTP server and block.
 	if cfg.serve {
 		return runFeedServer(ctx, cfg, reader, logger)
 	}
 
-	// Direct mode: use the replay engine.
+	// External engine plugin mode: stream through a subprocess engine.
+	if cfg.engine != "" && cfg.engine != "builtin" {
+		return runExternalEngine(ctx, cfg, reader, logger)
+	}
+
+	// Direct mode: use the builtin replay engine in-process.
 	return runDirectReplay(ctx, cfg, reader, logger)
+}
+
+// manifestPreflight loads the dataset manifest when the reader supports it
+// and the dataset has one. A manifest lets the run fail fast — before any
+// storage streaming or engine launch — on version skew and on empty
+// datasets (a typoed capture ID or a missing preshard layout).
+func manifestPreflight(ctx context.Context, reader replay.Reader, cfg config, logger *slog.Logger) error {
+	loader, ok := reader.(replay.ManifestLoader)
+	if !ok {
+		return nil
+	}
+	data, err := loader.LoadManifest(ctx, cfg.captureID)
+	if err != nil {
+		return fmt.Errorf("load dataset manifest: %w", err)
+	}
+	if data == nil {
+		logger.Debug("no dataset manifest; skipping preflight", "captureId", cfg.captureID)
+		return nil
+	}
+	manifest, err := dataset.ParseManifest(data)
+	if err != nil {
+		return fmt.Errorf("dataset manifest for %q: %w", cfg.captureID, err)
+	}
+	if cfg.failOnEmpty && manifest.RecordCount == 0 {
+		return fmt.Errorf("dataset manifest for %q declares 0 records; pass --fail-on-empty=false to allow empty replays", cfg.captureID)
+	}
+	logger.Info("dataset manifest verified",
+		"captureId", cfg.captureID,
+		"records", manifest.RecordCount,
+		"formatVersion", manifest.FormatVersion)
+	return nil
+}
+
+// runExternalEngine streams the capture through a plugin engine (k6, ghz,
+// or any kapture-engine-<name> binary in --plugin-dir) over the gRPC ABI.
+// Data is streamed end to end: reader → feeder → engine, bounded by gRPC
+// flow control, never materialised.
+func runExternalEngine(ctx context.Context, cfg config, reader replay.Reader, logger *slog.Logger) error {
+	manager := hostengine.NewManager(cfg.pluginDir, logger)
+	defer manager.Close()
+	if err := manager.Watch(ctx); err != nil {
+		// Hot reload is best-effort at the worker level; a missing watch
+		// (e.g. read-only volume driver quirks) should not fail the run.
+		logger.Warn("plugin hot reload unavailable", "error", err)
+	}
+
+	engine, err := manager.Acquire(ctx, cfg.engine)
+	if err != nil {
+		return err
+	}
+
+	runConfig, err := buildRunConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if err := engine.Configure(ctx, runConfig); err != nil {
+		return err
+	}
+
+	rateMode, err := parseRateMode(cfg.rateMode)
+	if err != nil {
+		return err
+	}
+	readOpts, err := buildReadOptions(cfg)
+	if err != nil {
+		return err
+	}
+
+	feeder, err := hostengine.NewFeeder(hostengine.FeederConfig{
+		Reader:        reader,
+		ReadOptions:   readOpts,
+		ShardIndex:    cfg.shardIndex,
+		ShardCount:    cfg.shardCount,
+		RateMode:      rateMode,
+		RatePerSecond: cfg.ratePerSecond,
+		TimeScale:     cfg.timeScale,
+		Logger:        logger,
+	})
+	if err != nil {
+		return err
+	}
+
+	report, err := feeder.Run(ctx, engine)
+	if err != nil {
+		return fmt.Errorf("engine %s run: %w", cfg.engine, err)
+	}
+
+	// An entirely empty read means the capture ID points at nothing —
+	// typically a typo or a missing preshard slice layout. Completing
+	// "successfully" with zero requests would silently mask that.
+	if cfg.failOnEmpty && feeder.Fed() == 0 && feeder.Skipped() == 0 {
+		return fmt.Errorf("no captured requests found for capture-id %q (missing capture or preshard layout?); pass --fail-on-empty=false to allow empty replays", cfg.captureID)
+	}
+
+	logger.Info("replay complete",
+		"engine", cfg.engine,
+		"totalRequests", report.TotalRequests,
+		"sent", report.SentRequests,
+		"failed", report.FailedRequests,
+		"achievedRPS", report.AchievedRPS,
+		"p99LatencyMs", report.P99LatencyMs)
+
+	if cfg.summaryPath != "" {
+		if err := report.WriteFile(cfg.summaryPath); err != nil {
+			logger.Warn("failed to write run report", "path", cfg.summaryPath, "error", err)
+		}
+	}
+	return nil
+}
+
+// buildRunConfig translates CLI flags into the engine ABI RunConfig.
+func buildRunConfig(cfg config) (*replayenginev1.RunConfig, error) {
+	target, err := url.Parse(cfg.targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse target url: %w", err)
+	}
+	port := 80
+	if target.Scheme == "https" {
+		port = 443
+	}
+	if p := target.Port(); p != "" {
+		port, err = strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("parse target port: %w", err)
+		}
+	}
+
+	return &replayenginev1.RunConfig{
+		RunId: cfg.replayID,
+		Target: &replayenginev1.Target{
+			Host: target.Hostname(),
+			Port: int32(port),
+			Tls:  target.Scheme == "https",
+		},
+		Concurrency: int32(cfg.concurrency),
+		Rate: &replayenginev1.RateHint{
+			Mode:              canonicalRateMode(cfg.rateMode),
+			RequestsPerSecond: int32(cfg.ratePerSecond),
+			TimeScale:         strconv.FormatFloat(cfg.timeScale, 'f', -1, 64),
+		},
+		ShardIndex:       int32(cfg.shardIndex),
+		ShardCount:       int32(cfg.shardCount),
+		EngineConfigJson: []byte(cfg.engineConfig),
+	}, nil
+}
+
+// canonicalRateMode maps CLI rate modes to the ABI's mode names.
+func canonicalRateMode(mode string) string {
+	switch strings.ToLower(mode) {
+	case "original", "recorded":
+		return "OriginalTiming"
+	case "constant":
+		return "Constant"
+	default:
+		return "Unlimited"
+	}
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func runFeedServer(ctx context.Context, cfg config, reader replay.Reader, logger *slog.Logger) error {
@@ -309,6 +502,10 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 
 	if err != nil {
 		return fmt.Errorf("replay engine: %w", err)
+	}
+
+	if cfg.failOnEmpty && summary.TotalRequests == 0 && summary.FilteredCount == 0 && engine.ShardSkipped() == 0 {
+		return fmt.Errorf("no captured requests found for capture-id %q (missing capture or preshard layout?); pass --fail-on-empty=false to allow empty replays", cfg.captureID)
 	}
 
 	printSummary(summary, logger)

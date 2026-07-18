@@ -24,9 +24,14 @@ const (
 	DefaultHeartbeatInterval = 30
 	// SpokeTimeout is how long after the last heartbeat a spoke is considered disconnected.
 	SpokeTimeout = 90 * time.Second
-	// DirectiveBufferSize is how many directives can be queued per spoke
-	// before SendDirective starts rejecting with ResourceExhausted.
+	// DirectiveBufferSize is the default for how many directives can be
+	// queued per spoke before SendDirective starts rejecting with
+	// ResourceExhausted. Override with Server.SetDirectiveBufferSize for
+	// deployments with large shard fan-outs per spoke.
 	DirectiveBufferSize = 32
+	// StopGracePeriod bounds how long Stop waits for in-flight RPCs before
+	// force-closing connections.
+	StopGracePeriod = 5 * time.Second
 )
 
 // spokeEntry tracks a connected spoke in the in-memory registry.
@@ -51,19 +56,54 @@ type Server struct {
 	mu     sync.RWMutex
 	spokes map[string]*spokeEntry // key: spoke_id
 
+	// activeLoadTests is the authoritative CaptureLoadTest list pushed by
+	// the CaptureHub reconciler from the CR store. It rides on heartbeat
+	// responses so spokes can garbage-collect orphaned replay shards.
+	// activeLoadTestsComplete is false until the reconciler has managed a
+	// successful CR list, so a cold cache never looks like "no load tests".
+	activeLoadTests         []*hubv1.LoadTestKey
+	activeLoadTestsComplete bool
+
 	grpcServer *grpc.Server
 	address    string
+
+	// directiveBufferSize is applied to spoke entries created after
+	// SetDirectiveBufferSize; zero means DirectiveBufferSize.
+	directiveBufferSize int
+
+	// shutdown is closed when the server stops so long-lived streaming
+	// handlers (WatchDirectives) return instead of blocking GracefulStop.
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
 }
 
 // NewServer creates a new hub gRPC server.
 func NewServer(address string, opts ...grpc.ServerOption) *Server {
 	s := &Server{
-		spokes:  make(map[string]*spokeEntry),
-		address: address,
+		spokes:   make(map[string]*spokeEntry),
+		address:  address,
+		shutdown: make(chan struct{}),
 	}
 	s.grpcServer = grpc.NewServer(opts...)
 	hubv1.RegisterHubServiceServer(s.grpcServer, s)
 	return s
+}
+
+// SetDirectiveBufferSize overrides the per-spoke directive buffer for
+// spokes that register after the call. Call before Start.
+func (s *Server) SetDirectiveBufferSize(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n > 0 {
+		s.directiveBufferSize = n
+	}
+}
+
+func (s *Server) directiveBufferSizeLocked() int {
+	if s.directiveBufferSize > 0 {
+		return s.directiveBufferSize
+	}
+	return DirectiveBufferSize
 }
 
 // NewServerWithTLS creates a new hub gRPC server with TLS credentials.
@@ -78,19 +118,35 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on %s: %w", s.address, err)
 	}
 
-	// Shut down gracefully when context is cancelled.
+	// Shut down when context is cancelled.
 	go func() {
 		<-ctx.Done()
-		s.grpcServer.GracefulStop()
+		s.Stop()
 	}()
 
 	return s.grpcServer.Serve(lis)
 }
 
-// Stop gracefully stops the gRPC server.
+// Stop stops the gRPC server. It first signals streaming handlers to
+// return — GracefulStop alone would block forever on the long-lived
+// WatchDirectives streams held by connected spokes — then falls back to a
+// hard stop if graceful shutdown does not finish within StopGracePeriod.
 func (s *Server) Stop() {
-	if s.grpcServer != nil {
+	if s.grpcServer == nil {
+		return
+	}
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
+
+	done := make(chan struct{})
+	go func() {
 		s.grpcServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(StopGracePeriod):
+		s.grpcServer.Stop()
+		<-done
 	}
 }
 
@@ -102,9 +158,12 @@ func (s *Server) GRPCServer() *grpc.Server {
 // --- Spoke lifecycle RPCs ---
 
 // RegisterSpoke registers a spoke cluster with the hub.
-func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
+func (s *Server) RegisterSpoke(ctx context.Context, req *hubv1.RegisterSpokeRequest) (*hubv1.RegisterSpokeResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
@@ -129,7 +188,7 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 		lastHeartbeat: now,
 		captures:      make(map[string]*hubv1.CaptureStatusSummary),
 		replays:       make(map[string]*hubv1.ReplayStatusSummary),
-		directives:    make(chan *hubv1.WatchDirectivesResponse, DirectiveBufferSize),
+		directives:    make(chan *hubv1.WatchDirectivesResponse, s.directiveBufferSizeLocked()),
 		done:          make(chan struct{}),
 	}
 
@@ -141,9 +200,12 @@ func (s *Server) RegisterSpoke(_ context.Context, req *hubv1.RegisterSpokeReques
 }
 
 // Heartbeat updates the last-seen timestamp for a spoke.
-func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hubv1.HeartbeatResponse, error) {
+func (s *Server) Heartbeat(ctx context.Context, req *hubv1.HeartbeatRequest) (*hubv1.HeartbeatResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
@@ -172,13 +234,31 @@ func (s *Server) Heartbeat(_ context.Context, req *hubv1.HeartbeatRequest) (*hub
 	}
 	entry.info.ActiveReplays = activeReplayCount(entry.replays)
 
-	return &hubv1.HeartbeatResponse{Acknowledged: true}, nil
+	metricHeartbeats.Inc()
+	return &hubv1.HeartbeatResponse{
+		Acknowledged:            true,
+		ActiveLoadTests:         s.activeLoadTests,
+		ActiveLoadTestsComplete: s.activeLoadTestsComplete,
+	}, nil
+}
+
+// SetActiveLoadTests publishes the authoritative CaptureLoadTest list for
+// heartbeat responses. complete must only be true when the list came from
+// a successful CR store read.
+func (s *Server) SetActiveLoadTests(keys []*hubv1.LoadTestKey, complete bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeLoadTests = keys
+	s.activeLoadTestsComplete = complete
 }
 
 // DeregisterSpoke removes a spoke from the registry.
-func (s *Server) DeregisterSpoke(_ context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
+func (s *Server) DeregisterSpoke(ctx context.Context, req *hubv1.DeregisterSpokeRequest) (*hubv1.DeregisterSpokeResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -201,6 +281,9 @@ func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.
 	if req.GetSpokeId() == "" {
 		return status.Error(codes.InvalidArgument, "spoke_id is required")
 	}
+	if err := verifySpokeIdentity(stream.Context(), req.SpokeId); err != nil {
+		return err
+	}
 
 	s.mu.RLock()
 	entry, ok := s.spokes[req.SpokeId]
@@ -213,6 +296,8 @@ func (s *Server) WatchDirectives(req *hubv1.WatchDirectivesRequest, stream grpc.
 		select {
 		case <-stream.Context().Done():
 			return stream.Context().Err()
+		case <-s.shutdown:
+			return status.Error(codes.Unavailable, "hub shutting down")
 		case <-entry.done:
 			return status.Errorf(codes.Aborted, "spoke %q deregistered", req.SpokeId)
 		case resp := <-entry.directives:
@@ -251,13 +336,16 @@ func (s *Server) queueDirective(spokeID string, resp *hubv1.WatchDirectivesRespo
 	entry, ok := s.spokes[spokeID]
 	s.mu.RUnlock()
 	if !ok {
+		metricDirectiveRejects.WithLabelValues("not_registered").Inc()
 		return status.Errorf(codes.NotFound, "spoke %q not registered", spokeID)
 	}
 
 	select {
 	case entry.directives <- resp:
+		metricDirectivesQueued.Inc()
 		return nil
 	default:
+		metricDirectiveRejects.WithLabelValues("buffer_full").Inc()
 		return status.Errorf(codes.ResourceExhausted, "directive buffer full for spoke %q", spokeID)
 	}
 }
@@ -291,9 +379,12 @@ func (s *Server) BroadcastDirective(directive *hubv1.CaptureDirective) int {
 // --- Status reporting ---
 
 // ReportCaptureStatus receives capture status updates from a spoke.
-func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
+func (s *Server) ReportCaptureStatus(ctx context.Context, req *hubv1.ReportCaptureStatusRequest) (*hubv1.ReportCaptureStatusResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 	if len(req.GetStatuses()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one status is required")
@@ -317,9 +408,12 @@ func (s *Server) ReportCaptureStatus(_ context.Context, req *hubv1.ReportCapture
 }
 
 // ReportReplayStatus receives replay shard status updates from a spoke.
-func (s *Server) ReportReplayStatus(_ context.Context, req *hubv1.ReportReplayStatusRequest) (*hubv1.ReportReplayStatusResponse, error) {
+func (s *Server) ReportReplayStatus(ctx context.Context, req *hubv1.ReportReplayStatusRequest) (*hubv1.ReportReplayStatusResponse, error) {
 	if req.GetSpokeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "spoke_id is required")
+	}
+	if err := verifySpokeIdentity(ctx, req.SpokeId); err != nil {
+		return nil, err
 	}
 	if len(req.GetStatuses()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one status is required")

@@ -7,6 +7,11 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	runtime2 "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	hubv1 "github.com/kapture-io/kapture/proto/hub/v1"
@@ -148,6 +153,24 @@ func TestBuildStartDirective_MapsSpec(t *testing.T) {
 	}
 }
 
+func TestBuildStartDirective_MapsEngine(t *testing.T) {
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.TotalShards = 1
+	lt.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{
+		Name:   "k6",
+		Config: &runtime.RawExtension{Raw: []byte(`{"vus":100}`)},
+	}
+
+	d := r.buildStartDirective(lt, 0)
+	if d.Spec.EngineName != "k6" {
+		t.Errorf("engine name = %q, want k6", d.Spec.EngineName)
+	}
+	if string(d.Spec.EngineConfigJson) != `{"vus":100}` {
+		t.Errorf("engine config = %s", d.Spec.EngineConfigJson)
+	}
+}
+
 func TestBuildStartDirective_DefaultsToOriginalTiming(t *testing.T) {
 	r := &CaptureLoadTestReconciler{}
 	lt := newLoadTest("lt")
@@ -231,6 +254,59 @@ func TestAggregate_RollsUpAndTransitionsPhase(t *testing.T) {
 	}
 }
 
+func TestReconcile_DeniesDisallowedTarget(t *testing.T) {
+	scheme := runtime2.NewScheme()
+	if err := capturev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	lt := newLoadTest("denied")
+	lt.Spec.Target.Host = "prod-api.example.com"
+	lt.Spec.Safety = &capturev1alpha1.ReplaySafety{
+		AllowedHosts: []string{"*.staging.internal"},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(lt).WithStatusSubresource(lt).Build()
+
+	srv := NewServer(":0")
+	registerSpokeInCell(t, srv, "spoke-a", "cell-a")
+
+	r := &CaptureLoadTestReconciler{
+		Client:         cl,
+		Log:            logr.Discard(),
+		ServerProvider: func() *Server { return srv },
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "denied"}}
+	// First reconcile adds the finalizer; second hits the safety gate.
+	for i := 0; i < 2; i++ {
+		if _, err := r.Reconcile(context.Background(), req); err != nil {
+			t.Fatalf("Reconcile #%d: %v", i+1, err)
+		}
+	}
+
+	got := &capturev1alpha1.CaptureLoadTest{}
+	if err := cl.Get(context.Background(), req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != capturev1alpha1.CaptureLoadTestPhaseFailed {
+		t.Errorf("phase = %s, want Failed", got.Status.Phase)
+	}
+	denied := false
+	for _, cond := range got.Status.Conditions {
+		if cond.Type == capturev1alpha1.LoadTestConditionTargetAllowed &&
+			cond.Status == metav1.ConditionFalse && cond.Reason == "TargetDenied" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Errorf("TargetAllowed condition missing: %+v", got.Status.Conditions)
+	}
+	if len(got.Status.Assignments) != 0 {
+		t.Errorf("denied load test was distributed: %+v", got.Status.Assignments)
+	}
+}
+
 func TestShouldAbort(t *testing.T) {
 	r := &CaptureLoadTestReconciler{}
 
@@ -301,7 +377,9 @@ func TestStopAllShards_SendsToEveryAssignedSpoke(t *testing.T) {
 		{SpokeID: "spoke-b", ShardIndexes: []int32{1}},
 	}
 
-	r.stopAllShards(s, lt, logr.Discard())
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards reported undelivered directives with healthy spokes")
+	}
 
 	for spoke, stream := range streams {
 		select {
@@ -313,5 +391,65 @@ func TestStopAllShards_SendsToEveryAssignedSpoke(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Errorf("spoke %s never received stop directive", spoke)
 		}
+	}
+}
+
+// TestStopAllShards_ReportsUndeliveredOnFullBuffer verifies the coordinator
+// learns when a STOP could not be queued so it retries instead of orphaning
+// running shards. This is the code-side half of the CleanupAfterDelete
+// property in verification/tla/KaptureLoadTest.tla.
+func TestStopAllShards_ReportsUndeliveredOnFullBuffer(t *testing.T) {
+	s := NewServer(":0")
+	registerSpokeInCell(t, s, "spoke-a", "cell-a")
+
+	// Fill the spoke's directive buffer so the STOP cannot be queued.
+	for i := 0; i < DirectiveBufferSize; i++ {
+		if err := s.SendReplayDirective("spoke-a", &hubv1.ReplayDirective{DirectiveId: "filler"}); err != nil {
+			t.Fatalf("filling buffer: %v", err)
+		}
+	}
+
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.Assignments = []capturev1alpha1.LoadTestAssignment{
+		{SpokeID: "spoke-a", ShardIndexes: []int32{0}},
+	}
+
+	if r.stopAllShards(s, lt, logr.Discard()) {
+		t.Fatal("stopAllShards claimed delivery with a full directive buffer")
+	}
+
+	// Drain the buffer (as the spoke's directive stream would) and retry:
+	// the STOP must now be accepted.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newFakeDirectiveStream(ctx)
+	go func() { _ = s.WatchDirectives(&hubv1.WatchDirectivesRequest{SpokeId: "spoke-a"}, stream) }()
+	for i := 0; i < DirectiveBufferSize; i++ {
+		select {
+		case <-stream.sent:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out draining directive buffer")
+		}
+	}
+
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards still undelivered after buffer drained")
+	}
+}
+
+// TestStopAllShards_DeregisteredSpokeCountsAsDelivered verifies a vanished
+// spoke does not wedge deletion forever.
+func TestStopAllShards_DeregisteredSpokeCountsAsDelivered(t *testing.T) {
+	s := NewServer(":0")
+
+	r := &CaptureLoadTestReconciler{}
+	lt := newLoadTest("lt")
+	lt.Status.Assignments = []capturev1alpha1.LoadTestAssignment{
+		{SpokeID: "gone-spoke", ShardIndexes: []int32{0}},
+	}
+
+	if !r.stopAllShards(s, lt, logr.Discard()) {
+		t.Error("stopAllShards blocked on a deregistered spoke")
 	}
 }

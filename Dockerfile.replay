@@ -1,0 +1,36 @@
+FROM golang:1.26 AS builder
+
+WORKDIR /src
+COPY . .
+RUN go mod tidy
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/kapture-replay-engine ./cmd/replay-engine && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/kapture-preshard ./cmd/kapture-preshard && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plugin-installer ./cmd/plugin-installer && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plugins/kapture-engine-builtin ./cmd/engines/builtin && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plugins/kapture-engine-k6 ./cmd/engines/k6 && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plugins/kapture-engine-ghz ./cmd/engines/ghz
+
+# Load-generator tool binaries wrapped by the k6/ghz engine adapters.
+# Both are static Go binaries, safe to copy into distroless.
+FROM grafana/k6:0.57.0 AS k6-dist
+
+FROM alpine:3.21 AS ghz-dist
+ARG GHZ_VERSION=0.120.0
+ARG TARGETARCH=amd64
+RUN wget -q -O /tmp/ghz.tar.gz \
+      "https://github.com/bojand/ghz/releases/download/v${GHZ_VERSION}/ghz-linux-x86_64.tar.gz" && \
+    tar -xzf /tmp/ghz.tar.gz -C /usr/local/bin ghz && \
+    chmod +x /usr/local/bin/ghz
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /out/kapture-replay-engine /kapture-replay-engine
+COPY --from=builder /out/kapture-preshard /kapture-preshard
+COPY --from=builder /out/plugin-installer /plugin-installer
+COPY --from=builder /out/plugins/ /plugins/
+COPY --from=k6-dist /usr/bin/k6 /usr/bin/k6
+COPY --from=ghz-dist /usr/local/bin/ghz /usr/bin/ghz
+ENV REPLAY_PLUGIN_DIR=/plugins
+ENTRYPOINT ["/kapture-replay-engine"]

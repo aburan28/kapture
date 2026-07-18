@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -36,6 +37,7 @@ import (
 
 var (
 	k8sClient client.Client
+	clientset *kubernetes.Clientset
 	ctx       context.Context
 	cancel    context.CancelFunc
 	testNS    string
@@ -62,7 +64,13 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	clientset, err = kubernetes.NewForConfig(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create clientset: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	os.Exit(m.Run())
@@ -319,15 +327,17 @@ func TestTrafficCaptureFailsWithMissingStorage(t *testing.T) {
 func TestTrafficCapturePendingWhenStorageNotReady(t *testing.T) {
 	ns := createNamespace(t)
 
-	// Create storage with intentionally invalid config so the controller
-	// marks it as Error rather than auto-promoting to Ready.
+	// Create storage the controller will mark Error rather than
+	// auto-promoting to Ready. The CRD schema rejects empty fields at
+	// admission, so use whitespace values: schema-valid, but the
+	// controller's semantic validation trims them and fails.
 	storage := &capturev1alpha1.CaptureStorage{
 		ObjectMeta: metav1.ObjectMeta{Name: "notready-storage", Namespace: ns},
 		Spec: capturev1alpha1.CaptureStorageSpec{
 			Type: capturev1alpha1.CaptureStorageTypeEFS,
 			EFS: &capturev1alpha1.EFSConfig{
-				FileSystemID: "",
-				MountPath:    "",
+				FileSystemID: " ",
+				MountPath:    "/ ",
 			},
 		},
 	}

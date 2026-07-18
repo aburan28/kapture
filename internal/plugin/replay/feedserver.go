@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -44,6 +45,7 @@ type FeedServer struct {
 	startTime time.Time
 
 	server   *http.Server
+	listener net.Listener
 	cancelFn context.CancelFunc // cancels the internal context to unblock reader
 	done     chan struct{}
 	once     sync.Once
@@ -127,14 +129,31 @@ func (s *FeedServer) Start(ctx context.Context) error {
 		Handler: mux,
 	}
 
-	s.log.Info("feed server starting", "addr", s.addr)
+	// Listen explicitly so callers using ":0" can discover the bound
+	// address via Addr().
+	lis, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("listen on %s: %w", s.addr, err)
+	}
+	s.listener = lis
+
+	s.log.Info("feed server starting", "addr", lis.Addr().String())
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.server.Serve(lis); err != nil && err != http.ErrServerClosed {
 			s.log.Error("feed server error", "error", err)
 		}
 	}()
 
 	return nil
+}
+
+// Addr returns the bound listen address. Nil until Start has been called.
+func (s *FeedServer) Addr() net.Addr {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Addr()
 }
 
 // Stop gracefully shuts down the feed server and closes the reader.
@@ -298,6 +317,9 @@ func (s *FeedServer) collectBatch(n int) []*storage.CapturedRequest {
 	}
 	return batch
 }
+
+// Served returns how many requests have been handed to consumers.
+func (s *FeedServer) Served() int64 { return s.served.Load() }
 
 type feedStatus struct {
 	Served      int64         `json:"served"`

@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -99,9 +100,14 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 
 	shardIndex := int32(0)
 	shardCount := int32(1)
+	var presharded *bool
 	if spec.Shard != nil {
 		shardIndex = spec.Shard.Index
 		shardCount = spec.Shard.Count
+		if spec.Shard.Presharded {
+			t := true
+			presharded = &t
+		}
 	}
 
 	replay := &capturev1alpha1.TrafficReplay{
@@ -120,8 +126,9 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 				Host: spec.TargetHost,
 			},
 			Shard: &capturev1alpha1.ReplayShardSpec{
-				Index: shardIndex,
-				Count: shardCount,
+				Index:      shardIndex,
+				Count:      shardCount,
+				Presharded: presharded,
 			},
 			LoadTestRef: &capturev1alpha1.LoadTestReference{Name: directive.LoadTestName},
 		},
@@ -138,6 +145,18 @@ func replayFromDirective(directive *hubv1.ReplayDirective) *capturev1alpha1.Traf
 	if spec.Concurrency > 0 {
 		concurrency := spec.Concurrency
 		replay.Spec.Concurrency = &concurrency
+	}
+
+	if spec.EngineName != "" || len(spec.EngineConfigJson) > 0 {
+		engine := &capturev1alpha1.ReplayEngineSpec{Name: spec.EngineName}
+		if len(spec.EngineConfigJson) > 0 {
+			engine.Config = &runtime.RawExtension{Raw: spec.EngineConfigJson}
+		}
+		replay.Spec.Engine = engine
+	}
+
+	if len(spec.AllowedHosts) > 0 {
+		replay.Spec.Safety = &capturev1alpha1.ReplaySafety{AllowedHosts: spec.AllowedHosts}
 	}
 
 	if rate := spec.Rate; rate != nil {

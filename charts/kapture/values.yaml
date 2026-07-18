@@ -46,6 +46,10 @@ hub:
     tag: "dev"
     pullPolicy: IfNotPresent
   replicas: 1
+  # -- Enable controller leader election. Turned on automatically when
+  # replicas > 1 so only one hub instance runs the gRPC server and
+  # coordinators at a time.
+  leaderElection: false
   resources:
     limits:
       cpu: 500m
@@ -67,9 +71,11 @@ hub:
     type: ClusterIP
     port: 9443
   tls:
-    # -- Name of the TLS secret for the hub gRPC server
+    # -- DEPRECATED and unused: the hub gRPC server reads its TLS material
+    # from the CaptureHub CR (spec.tls.certSecretRef + spec.authentication)
+    # via the Kubernetes API, not from a mounted volume. Kept only so
+    # existing values files keep parsing; will be removed.
     secretName: ""
-    # -- Namespace of the TLS secret
     secretNamespace: ""
   # -- Node selector for hub pods
   nodeSelector: {}
@@ -104,6 +110,15 @@ spoke:
   hub:
     # -- gRPC address of the hub (e.g. hub-service.capture-system.svc:9443)
     address: ""
+    tls:
+      # -- Secret holding the spoke's hub-connection TLS material
+      # (tls.crt/tls.key client certificate for mTLS, ca.crt for the hub
+      # server CA). Empty disables TLS on the hub connection. The hub side
+      # is configured on the CaptureHub CR (spec.tls + spec.authentication).
+      secretName: ""
+      # -- Expected hub server certificate name when it differs from the
+      # dial host.
+      serverName: ""
   # -- Deployment cell this spoke registers under. Cells let the hub target
   # captures and load tests at a subset of the fleet. Empty means no cell.
   cell: ""
@@ -123,6 +138,18 @@ replayEngine:
     repository: kapture/replay-engine
     tag: "dev"
     pullPolicy: IfNotPresent
+  # -- Directory inside replay worker pods that holds engine plugin
+  # binaries (kapture-engine-<name>) for non-builtin engines such as k6
+  # and ghz. The default replay-engine image bakes the OOTB plugins at
+  # /plugins. Empty disables plugin discovery configuration (builtin
+  # engine only).
+  pluginDir: ""
+  # -- Optional image whose /plugin-installer entrypoint delivers engine
+  # plugins into replay worker pods via an initContainer + shared
+  # emptyDir mounted at pluginDir. Lets plugin updates ship without
+  # rebuilding the replay-engine image (the replay-engine image itself
+  # satisfies the installer contract).
+  pluginImage: ""
 
 # -- Namespace to deploy into (defaults to Release.Namespace)
 namespace: ""

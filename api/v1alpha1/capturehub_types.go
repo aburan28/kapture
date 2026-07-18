@@ -23,7 +23,13 @@ type CaptureHubAuthentication struct {
 }
 
 // CaptureHubSpec defines the desired state of CaptureHub.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.authentication) || self.authentication.type != 'mTLS' || has(self.tls)",message="tls.certSecretRef is required when authentication.type is mTLS"
 type CaptureHubSpec struct {
+	// GRPCAddress is the listen address for the hub gRPC server, in Go
+	// net.Listen form: ":9443" or "host:port".
+	// +kubebuilder:validation:MinLength=2
+	// +kubebuilder:validation:Pattern=`^.*:[0-9]+$`
 	GRPCAddress string `json:"grpcAddress"`
 	// +optional
 	TLS *CaptureHubTLSConfig `json:"tls,omitempty"`
@@ -58,6 +64,11 @@ type CaptureHubCellStatus struct {
 	ActiveReplays int32 `json:"activeReplays,omitempty"`
 }
 
+// CaptureHubConditionActive reports whether this CaptureHub drives the
+// singleton gRPC server. When several CaptureHubs exist, only the oldest
+// (name as tiebreak) is Active; the others carry reason NotAuthoritative.
+const CaptureHubConditionActive = "Active"
+
 // CaptureHubStatus defines the observed state of CaptureHub.
 type CaptureHubStatus struct {
 	// +optional
@@ -71,6 +82,8 @@ type CaptureHubStatus struct {
 	// Cells aggregates connected spokes by their registered cell.
 	// +optional
 	Cells []CaptureHubCellStatus `json:"cells,omitempty"`
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // CaptureHub defines hub-wide capture controller configuration.

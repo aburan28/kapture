@@ -1,11 +1,17 @@
 package spoke
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
@@ -125,6 +131,113 @@ func TestBuildReplayJob_TLSAndConstantRate(t *testing.T) {
 	}
 }
 
+func TestBuildReplayJob_ExternalEngineArgs(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{
+		Name:   "k6",
+		Config: &runtime.RawExtension{Raw: []byte(`{"vus":200}`)},
+	}
+	t.Setenv("REPLAY_PLUGIN_DIR", "/plugins")
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if got := argValue(t, args, "--engine"); got != "k6" {
+		t.Errorf("--engine = %q", got)
+	}
+	if got := argValue(t, args, "--engine-config"); got != `{"vus":200}` {
+		t.Errorf("--engine-config = %q", got)
+	}
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	if len(env) != 1 || env[0].Name != "REPLAY_PLUGIN_DIR" || env[0].Value != "/plugins" {
+		t.Errorf("plugin dir env not passed through: %+v", env)
+	}
+}
+
+func TestBuildReplayJob_PreshardedReadsSliceWithoutFilter(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Shard.Presharded = bl(true)
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if got := argValue(t, args, "--capture-id"); got != "default/orders/shards/1-of-4" {
+		t.Errorf("--capture-id = %q, want the shard slice path", got)
+	}
+	if slices.Contains(args, "--shard-index") || slices.Contains(args, "--shard-count") {
+		t.Errorf("presharded replay must not hash-filter: %v", args)
+	}
+}
+
+func TestBuildReplayJob_PluginInstallerInitContainer(t *testing.T) {
+	tr := makeShardReplay()
+	t.Setenv("REPLAY_PLUGIN_IMAGE", "kapture/replay-engine:plugins-v2")
+	t.Setenv("REPLAY_PLUGIN_DIR", "/opt/plugins")
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+
+	inits := job.Spec.Template.Spec.InitContainers
+	if len(inits) != 1 {
+		t.Fatalf("got %d initContainers, want 1", len(inits))
+	}
+	if inits[0].Image != "kapture/replay-engine:plugins-v2" {
+		t.Errorf("installer image = %q", inits[0].Image)
+	}
+	if inits[0].Command[0] != "/plugin-installer" {
+		t.Errorf("installer command = %v", inits[0].Command)
+	}
+	if inits[0].VolumeMounts[0].MountPath != "/target" {
+		t.Errorf("installer mount = %+v", inits[0].VolumeMounts)
+	}
+
+	// The worker mounts the shared plugin volume at the plugin dir.
+	found := false
+	for _, m := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if m.Name == "engine-plugins" && m.MountPath == "/opt/plugins" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("worker missing plugin volume mount: %+v",
+			job.Spec.Template.Spec.Containers[0].VolumeMounts)
+	}
+}
+
+func TestBuildReplayJob_NoPluginImageNoInitContainer(t *testing.T) {
+	tr := makeShardReplay()
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("unexpected initContainers: %+v", job.Spec.Template.Spec.InitContainers)
+	}
+}
+
+func TestBuildReplayJob_BuiltinEngineOmitsEngineFlag(t *testing.T) {
+	tr := makeShardReplay()
+	tr.Spec.Engine = &capturev1alpha1.ReplayEngineSpec{Name: "builtin"}
+
+	job, err := BuildReplayJob(tr, makeS3Storage())
+	if err != nil {
+		t.Fatalf("BuildReplayJob: %v", err)
+	}
+	args := job.Spec.Template.Spec.Containers[0].Args
+	if slices.Contains(args, "--engine") {
+		t.Errorf("builtin engine should not pass --engine: %v", args)
+	}
+}
+
 func TestBuildReplayJob_EFSMountsVolume(t *testing.T) {
 	tr := makeShardReplay()
 	storage := &capturev1alpha1.CaptureStorage{
@@ -207,6 +320,40 @@ func TestReplaySummaryFromStatus(t *testing.T) {
 	}
 }
 
+func TestTrafficReplayReconciler_DeniesDisallowedTarget(t *testing.T) {
+	scheme := directiveScheme(t)
+	tr := makeShardReplay()
+	tr.ObjectMeta.Finalizers = []string{replayFinalizerName}
+	tr.Spec.Safety = &capturev1alpha1.ReplaySafety{
+		AllowedHosts: []string{"*.perf.svc"},
+	}
+
+	cl := fakeClientWithStatus(t, scheme, tr)
+	r := &TrafficReplayReconciler{Client: cl, Scheme: scheme}
+
+	req := reconcileRequestFor(tr)
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := &capturev1alpha1.TrafficReplay{}
+	if err := cl.Get(context.Background(), req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != capturev1alpha1.TrafficReplayPhaseFailed {
+		t.Errorf("phase = %s, want Failed", got.Status.Phase)
+	}
+	denied := false
+	for _, cond := range got.Status.Conditions {
+		if cond.Reason == "TargetDenied" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Errorf("TargetDenied condition missing: %+v", got.Status.Conditions)
+	}
+}
+
 func TestReplayShardName(t *testing.T) {
 	if got := ReplayShardName("lt", 3); got != "lt-shard-3" {
 		t.Errorf("ReplayShardName = %q", got)
@@ -214,4 +361,18 @@ func TestReplayShardName(t *testing.T) {
 	if !strings.HasPrefix(ReplayJobName(makeShardReplay()), "lt-shard-1") {
 		t.Errorf("job name should derive from replay name")
 	}
+}
+
+// --- shared reconciler-test helpers ---
+
+func fakeClientWithStatus(t *testing.T, scheme *runtime.Scheme, objs ...client.Object) client.Client {
+	t.Helper()
+	return fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(objs...).WithStatusSubresource(objs...).Build()
+}
+
+func reconcileRequestFor(obj client.Object) ctrl.Request {
+	return ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: obj.GetNamespace(), Name: obj.GetName(),
+	}}
 }

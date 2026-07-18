@@ -38,7 +38,10 @@ type RetentionPolicy struct {
 
 // S3Config defines Amazon S3 storage settings.
 type S3Config struct {
+	// +kubebuilder:validation:MinLength=3
+	// +kubebuilder:validation:MaxLength=63
 	Bucket string `json:"bucket"`
+	// +kubebuilder:validation:MinLength=1
 	Region string `json:"region"`
 	// +optional
 	Prefix               *string                       `json:"prefix,omitempty"`
@@ -47,6 +50,8 @@ type S3Config struct {
 
 // GCSConfig defines Google Cloud Storage settings.
 type GCSConfig struct {
+	// +kubebuilder:validation:MinLength=3
+	// +kubebuilder:validation:MaxLength=222
 	Bucket string `json:"bucket"`
 	// +optional
 	Prefix               *string                       `json:"prefix,omitempty"`
@@ -55,15 +60,19 @@ type GCSConfig struct {
 
 // EFSConfig defines Amazon EFS storage settings.
 type EFSConfig struct {
+	// +kubebuilder:validation:MinLength=1
 	FileSystemID string `json:"fileSystemID"`
-	MountPath    string `json:"mountPath"`
+	// +kubebuilder:validation:Pattern=`^/.*`
+	MountPath string `json:"mountPath"`
 	// +optional
 	Directory *string `json:"directory,omitempty"`
 }
 
 // EBSConfig defines Amazon EBS storage settings.
 type EBSConfig struct {
-	VolumeID  string `json:"volumeID"`
+	// +kubebuilder:validation:MinLength=1
+	VolumeID string `json:"volumeID"`
+	// +kubebuilder:validation:Pattern=`^/.*`
 	MountPath string `json:"mountPath"`
 	// +optional
 	Filesystem *string `json:"filesystem,omitempty"`
@@ -71,6 +80,7 @@ type EBSConfig struct {
 
 // PluginConfig defines Go plugin storage settings.
 type PluginConfig struct {
+	// +kubebuilder:validation:MinLength=1
 	Path string `json:"path"`
 	// +optional
 	Symbol *string `json:"symbol,omitempty"`
@@ -79,6 +89,12 @@ type PluginConfig struct {
 }
 
 // CaptureStorageSpec defines the desired state of CaptureStorage.
+//
+// +kubebuilder:validation:XValidation:rule="self.type != 'S3' || has(self.s3)",message="s3 configuration is required when type is S3"
+// +kubebuilder:validation:XValidation:rule="self.type != 'GCS' || has(self.gcs)",message="gcs configuration is required when type is GCS"
+// +kubebuilder:validation:XValidation:rule="self.type != 'EFS' || has(self.efs)",message="efs configuration is required when type is EFS"
+// +kubebuilder:validation:XValidation:rule="self.type != 'EBS' || has(self.ebs)",message="ebs configuration is required when type is EBS"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Plugin' || has(self.plugin)",message="plugin configuration is required when type is Plugin"
 type CaptureStorageSpec struct {
 	Type CaptureStorageType `json:"type"`
 	// +optional

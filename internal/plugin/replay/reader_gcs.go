@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 
 	gcsstorage "cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
+
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -138,8 +141,8 @@ func (r *GCSReader) Close() error {
 }
 
 func (r *GCSReader) TotalRead() int64        { return r.totalRead }
-func (r *GCSReader) ObjectCount() int         { return len(r.objects) }
-func (r *GCSReader) CurrentObjectIndex() int  { return r.objectIndex }
+func (r *GCSReader) ObjectCount() int        { return len(r.objects) }
+func (r *GCSReader) CurrentObjectIndex() int { return r.objectIndex }
 
 func (r *GCSReader) listObjects(ctx context.Context, prefix string, opts ReadOptions) ([]string, error) {
 	var objects []string
@@ -153,6 +156,11 @@ func (r *GCSReader) listObjects(ctx context.Context, prefix string, opts ReadOpt
 		if err != nil {
 			return nil, err
 		}
+		// Only capture data objects are JSONL.gz; skip manifests and any
+		// other stray objects under the prefix.
+		if !strings.HasSuffix(attrs.Name, ".jsonl.gz") {
+			continue
+		}
 		if filterObjectByTime(attrs.Name, opts.StartTime, opts.EndTime) {
 			objects = append(objects, attrs.Name)
 		}
@@ -160,6 +168,25 @@ func (r *GCSReader) listObjects(ctx context.Context, prefix string, opts ReadOpt
 
 	sort.Strings(objects)
 	return objects, nil
+}
+
+// LoadManifest returns the dataset manifest for a capture, or (nil, nil)
+// when none exists.
+func (r *GCSReader) LoadManifest(ctx context.Context, captureID string) ([]byte, error) {
+	key := buildObjectPrefix(r.prefix, captureID) + "/" + storage.ManifestObjectName
+	reader, err := r.client.Bucket(r.bucket).Object(key).NewReader(ctx)
+	if errors.Is(err, gcsstorage.ErrObjectNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get manifest %q: %w", key, err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest %q: %w", key, err)
+	}
+	return data, nil
 }
 
 func (r *GCSReader) openObject(ctx context.Context, key string) error {

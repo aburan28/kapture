@@ -67,7 +67,102 @@ export interface Spoke {
   healthState: SpokeHealthState;
   lastHeartbeat: string;
   activeCaptures: number;
+  activeReplays?: number;
+  cell?: string;
   version: string;
+}
+
+export interface Cell {
+  name: string;
+  connectedSpokes: number;
+  totalSpokes: number;
+  activeCaptures: number;
+  activeReplays: number;
+}
+
+export type LoadTestPhase =
+  | "Pending"
+  | "Distributing"
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "Aborted";
+
+export interface LoadTestAssignment {
+  spokeID: string;
+  cell?: string;
+  shardIndexes: number[];
+}
+
+export interface LoadTestCellStatus {
+  name: string;
+  spokes: number;
+  shards: number;
+  sentRequests: number;
+  failedRequests: number;
+}
+
+export interface CaptureLoadTest {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  spec: {
+    sourceRef: { name: string };
+    storageRef: { name: string };
+    target: { host: string; port?: number; tls?: boolean };
+    rate?: { mode: string; requestsPerSecond?: number };
+    distribution?: {
+      cells?: string[];
+      maxSpokes?: number;
+      workersPerSpoke?: number;
+      concurrencyPerWorker?: number;
+      presharded?: boolean;
+    };
+    engine?: { name: string };
+  };
+  status: {
+    phase: LoadTestPhase;
+    startTime?: string;
+    completionTime?: string;
+    totalShards: number;
+    assignedSpokes: number;
+    completedShards: number;
+    failedShards: number;
+    totalRequests: number;
+    sentRequests: number;
+    failedRequests: number;
+    achievedRPS?: string;
+    assignments?: LoadTestAssignment[];
+    cells?: LoadTestCellStatus[];
+  };
+}
+
+export type ReplayPhase = "Pending" | "Running" | "Completed" | "Failed";
+
+export interface TrafficReplay {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  spec: {
+    sourceRef: { name: string };
+    target: { host: string; port?: number };
+    shard?: { index: number; count: number; presharded?: boolean };
+    loadTestRef?: { name: string };
+    engine?: { name: string };
+  };
+  status: {
+    phase: ReplayPhase;
+    startTime?: string;
+    completionTime?: string;
+    totalRequests: number;
+    sentRequests: number;
+    failedRequests: number;
+    p50Latency?: string;
+    p95Latency?: string;
+    p99Latency?: string;
+    achievedRPS?: string;
+    spokeId?: string;
+  };
 }
 
 export interface CapturedRequest {

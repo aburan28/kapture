@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package replayengine.v1;
+
+option go_package = "github.com/kapture-io/kapture/proto/replayengine/v1;replayenginev1";
+
+import "google/protobuf/timestamp.proto";
+
+// ReplayEngineService is the ABI between the Kapture replay host (the
+// process that owns storage access, sharding, and pacing) and a replay
+// engine (the process that actually sends load: the builtin sender, k6,
+// ghz, or any third-party generator).
+//
+// The wire contract is deliberately narrow:
+//
+//   - The HOST owns data: it streams already-due, already-sharded requests
+//     to the engine. Engines never see storage credentials, bucket
+//     layouts, or shard math.
+//   - The ENGINE owns sending: it turns FeedItems into real traffic and
+//     reports results. Result granularity may be per-request
+//     (RESULT events) or aggregate (SUMMARY metrics), depending on what
+//     the underlying tool can observe.
+//
+// Engines are typically run as gRPC subprocesses discovered from a plugin
+// directory; see docs/replay-engine-abi.md for the handshake, versioning,
+// packaging, and hot-reload rules.
+service ReplayEngineService {
+  // Describe returns the engine identity and its supported ABI versions.
+  // The host calls it first and refuses engines with no common version.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+  // Configure prepares the engine for a run. Called exactly once before
+  // Execute. Engines must validate config here and fail fast.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+
+  // Execute is the run itself: the host streams FeedItems (client stream)
+  // and the engine streams ExecuteEvents back (server stream). The host
+  // half-closes the feed when the capture slice is exhausted; the engine
+  // finishes in-flight work, emits a final SUMMARY event, and closes its
+  // side. Backpressure is gRPC flow control: engines that read slowly
+  // slow the feed down, which is what keeps memory bounded on both sides.
+  rpc Execute(stream ExecuteRequest) returns (stream ExecuteResponse);
+
+  // Drain asks the engine to stop pulling new work and finish in-flight
+  // requests. Used for hot reload and abort. Idempotent.
+  rpc Drain(DrainRequest) returns (DrainResponse);
+}
+
+// ─── Handshake / identity ───────────────────────────────────────────────────
+
+message DescribeRequest {
+  // ABI versions the host speaks, e.g. ["v1"].
+  repeated string host_abi_versions = 1;
+}
+
+message DescribeResponse {
+  // Engine name, e.g. "builtin", "k6", "ghz". Must match the plugin
+  // binary suffix (kapture-engine-<name>).
+  string name = 1;
+  // Engine version (informational, e.g. the wrapped tool's version).
+  string version = 2;
+  // ABI versions the engine speaks. The host uses the first common entry.
+  repeated string abi_versions = 3;
+  // Protocols the engine can replay, e.g. ["HTTP"], ["GRPC"].
+  repeated string protocols = 4;
+  // Capability flags, e.g. "per-request-results", "aggregate-results",
+  // "self-paced". A "self-paced" engine applies its own pacing and the
+  // host feeds as fast as flow control allows.
+  repeated string capabilities = 5;
+}
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+message ConfigureRequest {
+  RunConfig config = 1;
+}
+
+message RunConfig {
+  // Identity of the run (namespace/name of the TrafficReplay shard).
+  string run_id = 1;
+
+  Target target = 2;
+
+  // Number of parallel senders the engine should use (VUs for k6,
+  // connections/concurrency for ghz, goroutines for builtin).
+  int32 concurrency = 3;
+
+  // Rate hint. Engines advertising "self-paced" receive it and pace
+  // themselves; otherwise the host paces the feed and engines should send
+  // items as they arrive.
+  RateHint rate = 4;
+
+  // Shard identity, informational: the host has already filtered the
+  // feed to this shard's slice.
+  int32 shard_index = 5;
+  int32 shard_count = 6;
+
+  // Engine-specific configuration, verbatim from the TrafficReplay /
+  // CaptureLoadTest spec.engine.config field (JSON).
+  bytes engine_config_json = 7;
+}
+
+message Target {
+  string host = 1;
+  int32 port = 2;
+  bool tls = 3;
+}
+
+message RateHint {
+  // One of "Constant", "OriginalTiming", "Unlimited".
+  string mode = 1;
+  // Target RPS for this shard when mode is Constant.
+  int32 requests_per_second = 2;
+  // Time scale multiplier for OriginalTiming (decimal string).
+  string time_scale = 3;
+}
+
+message ConfigureResponse {
+  bool accepted = 1;
+  // Human-readable reason when accepted is false.
+  string message = 2;
+}
+
+// ─── Execute stream ─────────────────────────────────────────────────────────
+
+message ExecuteRequest {
+  FeedItem item = 1;
+}
+
+// FeedItem is one captured request, already due (host-paced) and already
+// shard-filtered. It is self-contained: engines need no other data source.
+message FeedItem {
+  string request_id = 1;
+  google.protobuf.Timestamp captured_at = 2;
+  string protocol = 3; // "HTTP" or "GRPC"
+  string method = 4;   // HTTP method, or gRPC full method for GRPC
+  string path = 5;
+  map<string, HeaderValues> headers = 6;
+  bytes body = 7;
+  map<string, string> metadata = 8;
+  // Nanosecond offset of this request from the start of the capture;
+  // self-paced engines can rebuild the recorded timeline from it.
+  int64 source_offset_ns = 9;
+}
+
+message HeaderValues {
+  repeated string values = 1;
+}
+
+message ExecuteResponse {
+  oneof event {
+    RequestResult result = 1;
+    Progress progress = 2;
+    RunSummary summary = 3;
+  }
+}
+
+// RequestResult is a per-request outcome. Engines with the
+// "per-request-results" capability emit one per FeedItem.
+message RequestResult {
+  string request_id = 1;
+  int32 status_code = 2;
+  int64 latency_ms = 3;
+  string error = 4; // empty on success
+}
+
+// Progress is a periodic aggregate for engines that cannot report
+// per-request outcomes (k6, ghz). Values are cumulative for the run.
+message Progress {
+  int64 sent = 1;
+  int64 failed = 2;
+}
+
+// RunSummary is the final, mandatory event before the engine closes its
+// stream. Cumulative for the run.
+message RunSummary {
+  int64 total_requests = 1;
+  int64 sent_requests = 2;
+  int64 failed_requests = 3;
+  double achieved_rps = 4;
+  int64 mean_latency_ms = 5;
+  int64 p50_latency_ms = 6;
+  int64 p95_latency_ms = 7;
+  int64 p99_latency_ms = 8;
+  map<string, int64> status_codes = 9;
+  string message = 10;
+}
+
+// ─── Drain ──────────────────────────────────────────────────────────────────
+
+message DrainRequest {
+  // Grace period the engine has to finish in-flight work.
+  int64 grace_period_ms = 1;
+}
+
+message DrainResponse {
+  bool acknowledged = 1;
+}

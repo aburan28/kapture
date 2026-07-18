@@ -97,7 +97,10 @@ spec:
                       Cells restricts the load test to spokes registered in these cells.
                       Empty means all connected spokes are eligible.
                     items:
+                      maxLength: 63
+                      minLength: 1
                       type: string
+                    maxItems: 64
                     type: array
                   concurrencyPerWorker:
                     default: 10
@@ -114,6 +117,15 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                  presharded:
+                    description: |-
+                      Presharded indicates the source capture was pre-partitioned with
+                      kapture-preshard into exactly totalShards slices (participating
+                      spokes × workersPerSpoke). Each worker then reads only its own
+                      slice, cutting aggregate storage reads by a factor of the shard
+                      count. Combine with maxSpokes to pin the shard count to the
+                      presharded layout.
+                    type: boolean
                   workersPerSpoke:
                     default: 1
                     description: |-
@@ -122,6 +134,26 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                type: object
+              engine:
+                description: |-
+                  Engine selects the replay engine every shard runs (builtin, k6,
+                  ghz, or an installed plugin). Defaults to the builtin sender.
+                properties:
+                  config:
+                    description: |-
+                      Config is engine-specific configuration, passed verbatim (JSON) to
+                      the engine's Configure call.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  name:
+                    default: builtin
+                    description: |-
+                      Name of the engine: "builtin" (native HTTP sender, default), "k6",
+                      "ghz", or any installed plugin name.
+                    maxLength: 63
+                    pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                    type: string
                 type: object
               filters:
                 description: |-
@@ -142,7 +174,10 @@ spec:
                   methods:
                     description: Methods filters to specific HTTP methods.
                     items:
+                      maxLength: 32
+                      minLength: 1
                       type: string
+                    maxItems: 16
                     type: array
                   pathPrefix:
                     description: PathPrefix filters to requests whose path starts
@@ -154,6 +189,10 @@ spec:
                     format: date-time
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: startTime must be before endTime
+                  rule: '!has(self.startTime) || !has(self.endTime) || self.startTime
+                    < self.endTime'
               rate:
                 description: |-
                   Rate controls replay pacing. For Constant mode the configured
@@ -179,9 +218,35 @@ spec:
                     description: |-
                       TimeScale multiplies original inter-request delays when Mode is
                       OriginalTiming. 1.0 = real-time, 0.5 = 2x speed.
+                    pattern: ^[0-9]+(\.[0-9]+)?$
                     type: string
                 required:
                 - mode
+                type: object
+                x-kubernetes-validations:
+                - message: requestsPerSecond is required when mode is Constant
+                  rule: self.mode != 'Constant' || has(self.requestsPerSecond)
+                - message: timeScale only applies when mode is OriginalTiming
+                  rule: self.mode == 'OriginalTiming' || !has(self.timeScale)
+              safety:
+                description: |-
+                  Safety guards where replayed traffic may be sent. Enforced by the
+                  hub before any shard is distributed, and again by every spoke
+                  before running a shard.
+                properties:
+                  allowedHosts:
+                    description: |-
+                      AllowedHosts restricts the replay target. Patterns are exact
+                      hostnames ("staging-api.internal") or wildcard subdomains
+                      ("*.staging.internal"). Empty means no restriction (the policy is
+                      opt-in); once set, a target that matches no pattern is rejected
+                      before any traffic is generated.
+                    items:
+                      maxLength: 253
+                      pattern: ^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
+                      type: string
+                    maxItems: 64
+                    type: array
                 type: object
               sourceRef:
                 description: |-
@@ -190,6 +255,8 @@ spec:
                   referenced capture data through StorageRef.
                 properties:
                   name:
+                    maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name
@@ -216,11 +283,16 @@ spec:
                   host:
                     description: Host is the target hostname or IP to replay traffic
                       to.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
                     type: string
                   port:
                     description: Port is the target port. Defaults to 80 for HTTP,
                       443 for HTTPS.
                     format: int32
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                   tls:
                     default: false

@@ -96,6 +96,31 @@ func TestReplayDirectiveHandler_StartCreatesShard(t *testing.T) {
 	}
 }
 
+func TestReplayDirectiveHandler_StartMapsEngine(t *testing.T) {
+	scheme := directiveScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	h := &ReplayDirectiveHandler{Client: cl, Log: logr.Discard()}
+
+	d := startDirective()
+	d.Spec.EngineName = "ghz"
+	d.Spec.EngineConfigJson = []byte(`{"protoset":"/x"}`)
+	if err := h.Handle(context.Background(), d); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	tr := &capturev1alpha1.TrafficReplay{}
+	key := types.NamespacedName{Namespace: "default", Name: "lt-shard-1"}
+	if err := cl.Get(context.Background(), key, tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.Spec.Engine == nil || tr.Spec.Engine.Name != "ghz" {
+		t.Fatalf("engine not mapped: %+v", tr.Spec.Engine)
+	}
+	if string(tr.Spec.Engine.Config.Raw) != `{"protoset":"/x"}` {
+		t.Errorf("engine config not mapped: %s", tr.Spec.Engine.Config.Raw)
+	}
+}
+
 func TestReplayDirectiveHandler_StartIsIdempotent(t *testing.T) {
 	scheme := directiveScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
