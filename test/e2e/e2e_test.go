@@ -327,15 +327,17 @@ func TestTrafficCaptureFailsWithMissingStorage(t *testing.T) {
 func TestTrafficCapturePendingWhenStorageNotReady(t *testing.T) {
 	ns := createNamespace(t)
 
-	// Create storage with intentionally invalid config so the controller
-	// marks it as Error rather than auto-promoting to Ready.
+	// Create storage the controller will mark Error rather than
+	// auto-promoting to Ready. The CRD schema rejects empty fields at
+	// admission, so use whitespace values: schema-valid, but the
+	// controller's semantic validation trims them and fails.
 	storage := &capturev1alpha1.CaptureStorage{
 		ObjectMeta: metav1.ObjectMeta{Name: "notready-storage", Namespace: ns},
 		Spec: capturev1alpha1.CaptureStorageSpec{
 			Type: capturev1alpha1.CaptureStorageTypeEFS,
 			EFS: &capturev1alpha1.EFSConfig{
-				FileSystemID: "",
-				MountPath:    "",
+				FileSystemID: " ",
+				MountPath:    "/ ",
 			},
 		},
 	}
