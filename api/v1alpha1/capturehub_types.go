@@ -64,6 +64,11 @@ type CaptureHubCellStatus struct {
 	ActiveReplays int32 `json:"activeReplays,omitempty"`
 }
 
+// CaptureHubConditionActive reports whether this CaptureHub drives the
+// singleton gRPC server. When several CaptureHubs exist, only the oldest
+// (name as tiebreak) is Active; the others carry reason NotAuthoritative.
+const CaptureHubConditionActive = "Active"
+
 // CaptureHubStatus defines the observed state of CaptureHub.
 type CaptureHubStatus struct {
 	// +optional
@@ -77,6 +82,8 @@ type CaptureHubStatus struct {
 	// Cells aggregates connected spokes by their registered cell.
 	// +optional
 	Cells []CaptureHubCellStatus `json:"cells,omitempty"`
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // CaptureHub defines hub-wide capture controller configuration.

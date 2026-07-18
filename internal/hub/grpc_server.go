@@ -24,8 +24,10 @@ const (
 	DefaultHeartbeatInterval = 30
 	// SpokeTimeout is how long after the last heartbeat a spoke is considered disconnected.
 	SpokeTimeout = 90 * time.Second
-	// DirectiveBufferSize is how many directives can be queued per spoke
-	// before SendDirective starts rejecting with ResourceExhausted.
+	// DirectiveBufferSize is the default for how many directives can be
+	// queued per spoke before SendDirective starts rejecting with
+	// ResourceExhausted. Override with Server.SetDirectiveBufferSize for
+	// deployments with large shard fan-outs per spoke.
 	DirectiveBufferSize = 32
 	// StopGracePeriod bounds how long Stop waits for in-flight RPCs before
 	// force-closing connections.
@@ -65,6 +67,10 @@ type Server struct {
 	grpcServer *grpc.Server
 	address    string
 
+	// directiveBufferSize is applied to spoke entries created after
+	// SetDirectiveBufferSize; zero means DirectiveBufferSize.
+	directiveBufferSize int
+
 	// shutdown is closed when the server stops so long-lived streaming
 	// handlers (WatchDirectives) return instead of blocking GracefulStop.
 	shutdown     chan struct{}
@@ -81,6 +87,23 @@ func NewServer(address string, opts ...grpc.ServerOption) *Server {
 	s.grpcServer = grpc.NewServer(opts...)
 	hubv1.RegisterHubServiceServer(s.grpcServer, s)
 	return s
+}
+
+// SetDirectiveBufferSize overrides the per-spoke directive buffer for
+// spokes that register after the call. Call before Start.
+func (s *Server) SetDirectiveBufferSize(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n > 0 {
+		s.directiveBufferSize = n
+	}
+}
+
+func (s *Server) directiveBufferSizeLocked() int {
+	if s.directiveBufferSize > 0 {
+		return s.directiveBufferSize
+	}
+	return DirectiveBufferSize
 }
 
 // NewServerWithTLS creates a new hub gRPC server with TLS credentials.
@@ -165,7 +188,7 @@ func (s *Server) RegisterSpoke(ctx context.Context, req *hubv1.RegisterSpokeRequ
 		lastHeartbeat: now,
 		captures:      make(map[string]*hubv1.CaptureStatusSummary),
 		replays:       make(map[string]*hubv1.ReplayStatusSummary),
-		directives:    make(chan *hubv1.WatchDirectivesResponse, DirectiveBufferSize),
+		directives:    make(chan *hubv1.WatchDirectivesResponse, s.directiveBufferSizeLocked()),
 		done:          make(chan struct{}),
 	}
 

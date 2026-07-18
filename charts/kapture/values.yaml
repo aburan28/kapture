@@ -46,6 +46,10 @@ hub:
     tag: "dev"
     pullPolicy: IfNotPresent
   replicas: 1
+  # -- Enable controller leader election. Turned on automatically when
+  # replicas > 1 so only one hub instance runs the gRPC server and
+  # coordinators at a time.
+  leaderElection: false
   resources:
     limits:
       cpu: 500m

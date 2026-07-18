@@ -21,6 +21,10 @@ spec:
         - name: hub
           image: "{{ .Values.hub.image.repository }}:{{ .Values.hub.image.tag }}"
           imagePullPolicy: {{ .Values.hub.image.pullPolicy }}
+          {{- if or (gt (int .Values.hub.replicas) 1) .Values.hub.leaderElection }}
+          args:
+            - --enable-leader-election
+          {{- end }}
           ports:
             - name: grpc
               containerPort: 9443

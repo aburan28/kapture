@@ -9,6 +9,7 @@ import (
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -164,6 +165,16 @@ func TestReconcile_SecondCaptureHubDoesNotRetargetServer(t *testing.T) {
 	}
 	if got := r.GetServer(); got != first {
 		t.Fatal("reconciling a non-authoritative CaptureHub replaced the server")
+	}
+
+	// The ignored CR must say so in its status.
+	var ignored capturev1alpha1.CaptureHub
+	if err := r.Get(ctx, types.NamespacedName{Name: "extra"}, &ignored); err != nil {
+		t.Fatal(err)
+	}
+	cond := meta.FindStatusCondition(ignored.Status.Conditions, capturev1alpha1.CaptureHubConditionActive)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "NotAuthoritative" {
+		t.Fatalf("extra CaptureHub Active condition = %+v, want False/NotAuthoritative", cond)
 	}
 
 	// Deleting the newer CR must not stop the server either.

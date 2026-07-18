@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -258,6 +259,13 @@ func (c *HubClient) WatchDirectives(ctx context.Context) {
 func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{}) {
 	backoff := time.Second
 
+	// Jittered sleep: after a hub restart every spoke in the fleet sees
+	// its stream close at the same instant, and synchronized retries
+	// would stampede the hub in lockstep waves.
+	sleep := func(d time.Duration) {
+		time.Sleep(d/2 + rand.N(d))
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -272,7 +280,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 		spokeID := c.spokeID
 		c.mu.RUnlock()
 		if client == nil {
-			time.Sleep(backoff)
+			sleep(backoff)
 			continue
 		}
 
@@ -281,7 +289,7 @@ func (c *HubClient) watchDirectivesLoop(ctx context.Context, stopCh chan struct{
 		})
 		if err != nil {
 			c.log.Error(err, "opening directive stream", "backoff", backoff)
-			time.Sleep(backoff)
+			sleep(backoff)
 			backoff = min(backoff*2, 60*time.Second)
 			continue
 		}

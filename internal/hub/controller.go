@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +30,10 @@ import (
 type CaptureHubReconciler struct {
 	client.Client
 	Log logr.Logger
+
+	// DirectiveBufferSize overrides the per-spoke directive buffer on
+	// servers this reconciler starts; zero keeps the default.
+	DirectiveBufferSize int
 
 	mu          sync.Mutex
 	server      *Server
@@ -98,6 +103,19 @@ func (r *CaptureHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.ensureServer(ctx, hub); err != nil {
 		log.Error(err, "failed to ensure gRPC server")
 		return ctrl.Result{}, err
+	}
+
+	// Surface which CR the server follows: extra CaptureHubs get an
+	// explicit NotAuthoritative condition instead of silently doing
+	// nothing.
+	for i := range hubs.Items {
+		other := &hubs.Items[i]
+		if other.Name == hub.Name {
+			continue
+		}
+		if err := r.markNotAuthoritative(ctx, other, hub.Name); err != nil {
+			log.Error(err, "failed to update non-authoritative CaptureHub status", "capturehub", other.Name)
+		}
 	}
 
 	// Update CaptureHub status with aggregated spoke information.
@@ -186,6 +204,7 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 		r.server = NewServer(address)
 		r.dynamicTLS = nil
 	}
+	r.server.SetDirectiveBufferSize(r.DirectiveBufferSize)
 	r.tlsSecret = tlsSecret
 	r.tlsMTLS = requireMTLS
 	r.tlsDataHash = dataHash
@@ -256,6 +275,22 @@ func hubRequiresMTLS(hub *capturev1alpha1.CaptureHub) bool {
 		hub.Spec.Authentication.Type == capturev1alpha1.HubAuthenticationTypeMTLS
 }
 
+// markNotAuthoritative records on an extra CaptureHub that the singleton
+// gRPC server ignores it in favour of the authoritative CR.
+func (r *CaptureHubReconciler) markNotAuthoritative(ctx context.Context, hub *capturev1alpha1.CaptureHub, activeName string) error {
+	changed := meta.SetStatusCondition(&hub.Status.Conditions, metav1.Condition{
+		Type:               capturev1alpha1.CaptureHubConditionActive,
+		Status:             metav1.ConditionFalse,
+		Reason:             "NotAuthoritative",
+		Message:            fmt.Sprintf("gRPC server follows CaptureHub %q (oldest wins); this resource is ignored", activeName),
+		ObservedGeneration: hub.Generation,
+	})
+	if !changed {
+		return nil
+	}
+	return r.Status().Update(ctx, hub)
+}
+
 // stopServer gracefully stops the gRPC server.
 func (r *CaptureHubReconciler) stopServer() {
 	r.mu.Lock()
@@ -297,6 +332,14 @@ func (r *CaptureHubReconciler) updateStatus(ctx context.Context, hub *capturev1a
 		}
 		srv.SetActiveLoadTests(keys, true)
 	}
+
+	meta.SetStatusCondition(&hub.Status.Conditions, metav1.Condition{
+		Type:               capturev1alpha1.CaptureHubConditionActive,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Authoritative",
+		Message:            "gRPC server follows this CaptureHub",
+		ObservedGeneration: hub.Generation,
+	})
 
 	hub.Status.ConnectedSpokes = srv.ConnectedSpokeCount()
 	hub.Status.ActiveCaptures = srv.ActiveCaptureCount()
