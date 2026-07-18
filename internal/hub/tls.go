@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"sync/atomic"
 
 	"google.golang.org/grpc/credentials"
 	corev1 "k8s.io/api/core/v1"
@@ -18,11 +19,10 @@ const (
 	TLSCAKey   = "ca.crt"
 )
 
-// BuildServerCredentials builds gRPC transport credentials for the hub
-// server from a TLS secret's data. When requireClientCert is true (mTLS),
-// the secret must also carry ca.crt and spokes must present certificates
-// signed by it.
-func BuildServerCredentials(secretData map[string][]byte, requireClientCert bool) (credentials.TransportCredentials, error) {
+// buildServerTLSConfig parses a TLS secret's data into a server tls.Config.
+// When requireClientCert is true (mTLS), the secret must also carry ca.crt
+// and spokes must present certificates signed by it.
+func buildServerTLSConfig(secretData map[string][]byte, requireClientCert bool) (*tls.Config, error) {
 	certPEM, ok := secretData[TLSCertKey]
 	if !ok {
 		return nil, fmt.Errorf("TLS secret missing %s", TLSCertKey)
@@ -40,6 +40,9 @@ func BuildServerCredentials(secretData map[string][]byte, requireClientCert bool
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
+		// This config is returned from GetConfigForClient during the
+		// handshake, so ALPN must be declared here: gRPC requires h2.
+		NextProtos: []string{"h2"},
 	}
 
 	if requireClientCert {
@@ -55,5 +58,56 @@ func BuildServerCredentials(secretData map[string][]byte, requireClientCert bool
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 	}
 
+	return cfg, nil
+}
+
+// BuildServerCredentials builds static gRPC transport credentials from a
+// TLS secret's data. Rotation-aware callers should use DynamicServerTLS
+// instead.
+func BuildServerCredentials(secretData map[string][]byte, requireClientCert bool) (credentials.TransportCredentials, error) {
+	cfg, err := buildServerTLSConfig(secretData, requireClientCert)
+	if err != nil {
+		return nil, err
+	}
 	return credentials.NewTLS(cfg), nil
+}
+
+// DynamicServerTLS serves TLS with hot-rotatable certificates: every
+// handshake resolves the current config via GetConfigForClient, so
+// updating the secret rotates the server certificate and client CA
+// without restarting the gRPC listener or disturbing connected spokes.
+type DynamicServerTLS struct {
+	current atomic.Pointer[tls.Config]
+}
+
+// NewDynamicServerTLS builds the initial configuration from a TLS
+// secret's data.
+func NewDynamicServerTLS(secretData map[string][]byte, requireClientCert bool) (*DynamicServerTLS, error) {
+	d := &DynamicServerTLS{}
+	if err := d.Update(secretData, requireClientCert); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// Update parses new secret data and atomically swaps it in for future
+// handshakes. Existing connections are unaffected.
+func (d *DynamicServerTLS) Update(secretData map[string][]byte, requireClientCert bool) error {
+	cfg, err := buildServerTLSConfig(secretData, requireClientCert)
+	if err != nil {
+		return err
+	}
+	d.current.Store(cfg)
+	return nil
+}
+
+// Credentials returns gRPC transport credentials that follow the current
+// configuration.
+func (d *DynamicServerTLS) Credentials() credentials.TransportCredentials {
+	return credentials.NewTLS(&tls.Config{
+		MinVersion: tls.VersionTLS12,
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			return d.current.Load(), nil
+		},
+	})
 }

@@ -2,18 +2,21 @@ package hub
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
-	"google.golang.org/grpc/credentials"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
@@ -27,17 +30,47 @@ type CaptureHubReconciler struct {
 	client.Client
 	Log logr.Logger
 
-	mu        sync.Mutex
-	server    *Server
-	cancel    context.CancelFunc
-	tlsSecret string // "namespace/name" of the TLS secret in use, "" = plaintext
+	mu          sync.Mutex
+	server      *Server
+	cancel      context.CancelFunc
+	tlsSecret   string // "namespace/name" of the TLS secret in use, "" = plaintext
+	tlsMTLS     bool
+	tlsDataHash string
+	dynamicTLS  *DynamicServerTLS
 }
 
-// SetupWithManager registers the reconciler with the controller-runtime manager.
+// SetupWithManager registers the reconciler with the controller-runtime
+// manager. The secret watch drives in-place certificate rotation: an
+// update to the referenced TLS secret re-reconciles the CaptureHub.
 func (r *CaptureHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&capturev1alpha1.CaptureHub{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.hubsReferencingSecret)).
 		Complete(r)
+}
+
+// hubsReferencingSecret maps a Secret event to the CaptureHubs whose
+// spec.tls.certSecretRef points at it.
+func (r *CaptureHubReconciler) hubsReferencingSecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	var hubs capturev1alpha1.CaptureHubList
+	if err := r.List(ctx, &hubs); err != nil {
+		r.Log.Error(err, "failed to list CaptureHubs for secret mapping")
+		return nil
+	}
+	var requests []reconcile.Request
+	for i := range hubs.Items {
+		hub := &hubs.Items[i]
+		if hub.Spec.TLS == nil {
+			continue
+		}
+		ref := hub.Spec.TLS.CertSecretRef
+		if string(ref.Name) == obj.GetName() && hubSecretNamespace(ref) == obj.GetNamespace() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: hub.Name},
+			})
+		}
+	}
+	return requests
 }
 
 // Reconcile handles CaptureHub CR changes: starts/reconfigures the gRPC server
@@ -96,7 +129,10 @@ func authoritativeHub(items []capturev1alpha1.CaptureHub) *capturev1alpha1.Captu
 }
 
 // ensureServer starts or reconfigures the gRPC server, with TLS/mTLS from
-// the CaptureHub spec's certificate secret when configured.
+// the CaptureHub spec's certificate secret when configured. Certificate
+// rotation within the same secret is applied in place, without restarting
+// the listener or disconnecting spokes; only address or TLS-mode changes
+// restart the server.
 func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1alpha1.CaptureHub) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,16 +142,24 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 		address = ":9443"
 	}
 
-	creds, tlsSecret, err := r.buildCredentials(ctx, hub)
+	secretData, tlsSecret, err := r.loadTLSSecret(ctx, hub)
 	if err != nil {
 		return err
 	}
+	requireMTLS := hubRequiresMTLS(hub)
+	dataHash := hashTLSData(secretData)
 
-	// If the server is already running with the right address and TLS
-	// source, nothing to do. Certificate *rotation* within the same
-	// secret is not hot-reloaded yet; change the secret name to force a
-	// server restart.
-	if r.server != nil && r.server.address == address && r.tlsSecret == tlsSecret {
+	if r.server != nil && r.server.address == address &&
+		r.tlsSecret == tlsSecret && r.tlsMTLS == requireMTLS {
+		// Listener configuration unchanged; rotate certificates in place
+		// when the secret content changed.
+		if r.dynamicTLS != nil && dataHash != r.tlsDataHash {
+			if err := r.dynamicTLS.Update(secretData, requireMTLS); err != nil {
+				return fmt.Errorf("rotate TLS from secret %s: %w", tlsSecret, err)
+			}
+			r.tlsDataHash = dataHash
+			r.Log.Info("Rotated hub TLS certificates in place", "secret", tlsSecret)
+		}
 		return nil
 	}
 
@@ -128,15 +172,23 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 		r.cancel = nil
 	}
 
-	if creds != nil {
+	if secretData != nil {
+		dynamicTLS, err := NewDynamicServerTLS(secretData, requireMTLS)
+		if err != nil {
+			return fmt.Errorf("TLS secret %s: %w", tlsSecret, err)
+		}
 		r.Log.Info("Starting gRPC server with TLS", "address", address,
-			"secret", tlsSecret, "mTLS", hubRequiresMTLS(hub))
-		r.server = NewServerWithTLS(address, creds)
+			"secret", tlsSecret, "mTLS", requireMTLS)
+		r.server = NewServerWithTLS(address, dynamicTLS.Credentials())
+		r.dynamicTLS = dynamicTLS
 	} else {
 		r.Log.Info("Starting gRPC server (plaintext)", "address", address)
 		r.server = NewServer(address)
+		r.dynamicTLS = nil
 	}
 	r.tlsSecret = tlsSecret
+	r.tlsMTLS = requireMTLS
+	r.tlsDataHash = dataHash
 
 	serverCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
@@ -152,9 +204,9 @@ func (r *CaptureHubReconciler) ensureServer(ctx context.Context, hub *capturev1a
 
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// buildCredentials loads TLS credentials from the CaptureHub's certificate
-// secret. Returns nil credentials for plaintext configurations.
-func (r *CaptureHubReconciler) buildCredentials(ctx context.Context, hub *capturev1alpha1.CaptureHub) (credentials.TransportCredentials, string, error) {
+// loadTLSSecret fetches the CaptureHub's certificate secret data. Returns
+// nil data for plaintext configurations.
+func (r *CaptureHubReconciler) loadTLSSecret(ctx context.Context, hub *capturev1alpha1.CaptureHub) (map[string][]byte, string, error) {
 	if hub.Spec.TLS == nil {
 		return nil, "", nil
 	}
@@ -167,12 +219,23 @@ func (r *CaptureHubReconciler) buildCredentials(ctx context.Context, hub *captur
 	if err := r.Get(ctx, key, &secret); err != nil {
 		return nil, "", fmt.Errorf("load TLS secret %s: %w", key, err)
 	}
+	return secret.Data, key.String(), nil
+}
 
-	creds, err := BuildServerCredentials(secret.Data, hubRequiresMTLS(hub))
-	if err != nil {
-		return nil, "", fmt.Errorf("TLS secret %s: %w", key, err)
+// hashTLSData fingerprints the TLS-relevant secret keys so rotation is
+// detected by content, not by resource version churn.
+func hashTLSData(secretData map[string][]byte) string {
+	if secretData == nil {
+		return ""
 	}
-	return creds, key.String(), nil
+	h := sha256.New()
+	for _, key := range []string{TLSCertKey, TLSKeyKey, TLSCAKey} {
+		h.Write([]byte(key))
+		h.Write([]byte{0})
+		h.Write(secretData[key])
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // hubSecretNamespace resolves the secret namespace for the cluster-scoped

@@ -219,6 +219,85 @@ func TestHubSpokeMTLS_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestHubTLSRotation_InPlace rotates the hub's entire PKI (server cert,
+// key, and client CA) through DynamicServerTLS while the server keeps
+// running: clients on the new PKI must connect without a server restart,
+// and clients on the old PKI must be rejected afterwards.
+func TestHubTLSRotation_InPlace(t *testing.T) {
+	pkiA := newTestPKI(t)
+	pkiB := newTestPKI(t)
+
+	secretFor := func(p *testPKI) map[string][]byte {
+		return map[string][]byte{
+			hub.TLSCertKey: p.read(t, p.serverCert),
+			hub.TLSKeyKey:  p.read(t, p.serverKey),
+			hub.TLSCAKey:   p.read(t, p.caPEM),
+		}
+	}
+
+	dynamicTLS, err := hub.NewDynamicServerTLS(secretFor(pkiA), true)
+	if err != nil {
+		t.Fatalf("NewDynamicServerTLS: %v", err)
+	}
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := lis.Addr().String()
+	lis.Close()
+
+	server := hub.NewServerWithTLS(addr, dynamicTLS.Credentials())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = server.Start(ctx) }()
+	defer server.Stop()
+	waitForListen(t, addr)
+
+	register := func(p *testPKI, spokeName string) error {
+		tlsCfg, err := BuildHubTLSConfig(HubTLSFiles{
+			CertFile:   p.clientCert,
+			KeyFile:    p.clientKey,
+			CAFile:     p.caPEM,
+			ServerName: "localhost",
+		})
+		if err != nil {
+			return err
+		}
+		client := NewHubClient(HubClientConfig{
+			HubAddress: addr,
+			SpokeName:  spokeName,
+			ClusterID:  spokeName,
+			TLSConfig:  tlsCfg,
+			Logger:     logr.Discard(),
+		})
+		if err := client.Connect(ctx); err != nil {
+			return err
+		}
+		defer client.Close()
+		regCtx, regCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer regCancel()
+		_, err = client.Register(regCtx)
+		return err
+	}
+
+	if err := register(pkiA, "kapture-spoke"); err != nil {
+		t.Fatalf("register with original PKI: %v", err)
+	}
+
+	// Rotate the whole PKI in place — no server restart.
+	if err := dynamicTLS.Update(secretFor(pkiB), true); err != nil {
+		t.Fatalf("rotate TLS: %v", err)
+	}
+
+	if err := register(pkiB, "kapture-spoke"); err != nil {
+		t.Fatalf("register with rotated PKI after in-place rotation: %v", err)
+	}
+	if err := register(pkiA, "kapture-spoke"); err == nil {
+		t.Fatal("client on the retired PKI still accepted after rotation")
+	}
+}
+
 func TestBuildServerCredentials_Validation(t *testing.T) {
 	pki := newTestPKI(t)
 

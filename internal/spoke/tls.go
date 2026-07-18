@@ -51,11 +51,21 @@ func BuildHubTLSConfig(files HubTLSFiles) (*tls.Config, error) {
 		if files.CertFile == "" || files.KeyFile == "" {
 			return nil, fmt.Errorf("hub TLS client certificate requires both cert and key files")
 		}
-		cert, err := tls.LoadX509KeyPair(files.CertFile, files.KeyFile)
-		if err != nil {
+		// Fail fast on unloadable certificates at startup...
+		if _, err := tls.LoadX509KeyPair(files.CertFile, files.KeyFile); err != nil {
 			return nil, fmt.Errorf("load hub client certificate: %w", err)
 		}
-		cfg.Certificates = []tls.Certificate{cert}
+		// ...but re-read the files on every handshake so rotated secret
+		// mounts (kubelet updates them in place) take effect on the next
+		// reconnect without restarting the spoke.
+		certFile, keyFile := files.CertFile, files.KeyFile
+		cfg.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, fmt.Errorf("reload hub client certificate: %w", err)
+			}
+			return &cert, nil
+		}
 	}
 
 	return cfg, nil
