@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/kapture-io/kapture/internal/stats"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -29,6 +31,7 @@ type CaptureHandler struct {
 	maxBodyBytes int64
 	filter       *RequestFilter
 	redactor     *HeaderRedactor
+	stats        *stats.Collector
 	log          *slog.Logger
 
 	// Metrics
@@ -48,7 +51,10 @@ type CaptureHandlerConfig struct {
 	// RedactedValue before storage. Nil applies DefaultRedactHeaders; an
 	// explicit empty (non-nil) slice disables redaction.
 	RedactHeaders []string
-	Logger        *slog.Logger
+	// Stats optionally aggregates streaming statistics over captured
+	// requests (flow windows, cardinalities, heavy hitters, quantiles).
+	Stats  *stats.Collector
+	Logger *slog.Logger
 }
 
 // NewCaptureHandler creates a CaptureHandler with the given configuration.
@@ -67,6 +73,7 @@ func NewCaptureHandler(cfg CaptureHandlerConfig) *CaptureHandler {
 		maxBodyBytes: cfg.MaxBodyBytes,
 		filter:       cfg.Filter,
 		redactor:     NewHeaderRedactor(cfg.RedactHeaders),
+		stats:        cfg.Stats,
 		log:          cfg.Logger,
 	}
 }
@@ -75,6 +82,7 @@ func NewCaptureHandler(cfg CaptureHandlerConfig) *CaptureHandler {
 // converts to a CapturedRequest, and writes it to storage. If the write fails,
 // the request is dropped and a metric counter is incremented.
 func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) error {
+	start := time.Now()
 	h.requestsTotal.Add(1)
 
 	if !h.filter.Matches(req) {
@@ -117,6 +125,12 @@ func (h *CaptureHandler) Handle(ctx context.Context, req *CapturedHTTPRequest) e
 			captured.Metadata = make(map[string]string)
 		}
 		captured.Metadata["bodyTruncated"] = "true"
+	}
+
+	// Statistics observe every request that passed the filters, whether
+	// or not the storage write succeeds — the traffic was seen either way.
+	if h.stats != nil {
+		h.stats.Observe(captured, time.Since(start))
 	}
 
 	if err := h.writer.Write(ctx, captured); err != nil {

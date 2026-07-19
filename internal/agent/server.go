@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	"github.com/kapture-io/kapture/internal/stats"
 )
 
 // AgentServerConfig holds configuration for the AgentServer.
@@ -24,7 +27,9 @@ type AgentServerConfig struct {
 	HealthPort int
 	Handler    *CaptureHandler
 	// Queue optionally exposes write-queue metrics on /metrics.
-	Queue  *AsyncWriter
+	Queue *AsyncWriter
+	// Stats optionally serves streaming statistics on /stats.
+	Stats  *stats.Collector
 	Logger *slog.Logger
 }
 
@@ -36,6 +41,7 @@ type AgentServer struct {
 	healthServer *http.Server
 	handler      *CaptureHandler
 	queue        *AsyncWriter
+	stats        *stats.Collector
 	log          *slog.Logger
 	httpPort     int
 	grpcPort     int
@@ -60,6 +66,7 @@ func NewAgentServer(cfg AgentServerConfig) *AgentServer {
 	s := &AgentServer{
 		handler:    cfg.Handler,
 		queue:      cfg.Queue,
+		stats:      cfg.Stats,
 		log:        cfg.Logger,
 		httpPort:   cfg.HTTPPort,
 		grpcPort:   cfg.GRPCPort,
@@ -84,6 +91,7 @@ func NewAgentServer(cfg AgentServerConfig) *AgentServer {
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", s.handleHealth)
 	healthMux.HandleFunc("/metrics", s.handleMetrics)
+	healthMux.HandleFunc("/stats", s.handleStats)
 	s.healthServer = &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HealthPort),
 		Handler:           healthMux,
@@ -265,4 +273,15 @@ func (s *AgentServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "# TYPE capture_agent_storage_write_errors_total counter\n")
 		fmt.Fprintf(w, "capture_agent_storage_write_errors_total %d\n", s.queue.WriteErrors())
 	}
+}
+
+// handleStats serves the streaming-statistics snapshot: flow-window
+// counters, cardinality estimates, heavy hitters, and quantiles.
+func (s *AgentServer) handleStats(w http.ResponseWriter, _ *http.Request) {
+	if s.stats == nil {
+		http.Error(w, "statistics disabled", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.stats.Snapshot())
 }

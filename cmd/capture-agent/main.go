@@ -15,6 +15,7 @@ import (
 
 	"github.com/kapture-io/kapture/internal/agent"
 	"github.com/kapture-io/kapture/internal/history"
+	"github.com/kapture-io/kapture/internal/stats"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -41,6 +42,11 @@ func main() {
 		filterHeaders    = flag.String("filter-headers", envOr("FILTER_HEADERS", ""), `Header filters as JSON array, e.g. [{"name":"x-debug","value":"true"}]`)
 		filterPercentage = flag.Int("filter-percentage", envIntOr("FILTER_PERCENTAGE", 100), "Percentage of requests to capture (0-100)")
 		writeQueueSize   = flag.Int("write-queue-size", envIntOr("CAPTURE_WRITE_QUEUE_SIZE", agent.DefaultWriteQueueSize), "Bounded write queue size between capture and storage; new captures are dropped (and counted) when full")
+		statsWindow      = flag.Duration("stats-window", envDurationOr("STATS_WINDOW", stats.DefaultWindowDuration), "Tumbling flow-window duration for streaming statistics")
+		statsTopK        = flag.Int("stats-top-k", envIntOr("STATS_TOP_K", 10), "Heavy hitters tracked per dimension (paths, client IPs)")
+		redisAddr        = flag.String("redis-addr", envOr("REDIS_ADDR", ""), "Redis host:port for statistics publishing; empty disables")
+		redisDB          = flag.Int("redis-db", envIntOr("REDIS_DB", 0), "Redis logical database for statistics")
+		statsInterval    = flag.Duration("stats-publish-interval", envDurationOr("STATS_PUBLISH_INTERVAL", stats.DefaultPublishInterval), "How often statistics snapshots are pushed to Redis")
 	)
 	flag.Parse()
 
@@ -143,11 +149,36 @@ func main() {
 		})
 	}
 
+	// Streaming statistics over the capture path: flow-window counters,
+	// HyperLogLog cardinalities, Count-Min heavy hitters, DDSketch
+	// quantiles, and Bloom flow membership. Always on (fixed small
+	// memory), served at /stats and optionally published to Redis.
+	statsCollector := stats.NewCollector(stats.CollectorConfig{
+		WindowDuration: *statsWindow,
+		TopK:           *statsTopK,
+	})
+	if *redisAddr != "" {
+		sink, err := stats.NewRedisSink(ctx, stats.RedisSinkConfig{
+			Addr:     *redisAddr,
+			Password: os.Getenv("REDIS_PASSWORD"),
+			DB:       *redisDB,
+		})
+		if err != nil {
+			log.Error("failed to connect statistics Redis", "error", err)
+			os.Exit(1)
+		}
+		publisher := stats.NewPublisher(statsCollector, sink, *captureID, *statsInterval, log)
+		go publisher.Run(ctx)
+		log.Info("statistics publishing enabled", "redis", *redisAddr,
+			"snapshotKey", stats.SnapshotKey(*captureID), "windowStream", stats.WindowStream(*captureID))
+	}
+
 	handler := agent.NewCaptureHandler(agent.CaptureHandlerConfig{
 		Writer:        asyncWriter,
 		MaxBodyBytes:  *maxBodyBytes,
 		Filter:        requestFilter,
 		RedactHeaders: parseRedactHeaders(os.Getenv("CAPTURE_REDACT_HEADERS")),
+		Stats:         statsCollector,
 		Logger:        log,
 	})
 
@@ -157,6 +188,7 @@ func main() {
 		HealthPort: *healthPort,
 		Handler:    handler,
 		Queue:      asyncWriter,
+		Stats:      statsCollector,
 		Logger:     log,
 	})
 
@@ -317,6 +349,17 @@ func parseRedactHeaders(value string) []string {
 func envOr(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
+	}
+	return fallback
+}
+
+func envDurationOr(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(value); err == nil {
+		return d
 	}
 	return fallback
 }
