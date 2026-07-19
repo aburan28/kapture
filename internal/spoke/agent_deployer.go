@@ -215,6 +215,19 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 				corev1.EnvVar{Name: "EBS_MOUNT_PATH", Value: storage.Spec.EBS.MountPath},
 			)
 		}
+	case capturev1alpha1.CaptureStorageTypeRDS:
+		if storage.Spec.RDS != nil {
+			envs = append(envs, corev1.EnvVar{
+				Name: "RDS_DSN",
+				ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: string(storage.Spec.RDS.ConnectionSecretRef.Name)},
+					Key:                  "dsn",
+				}},
+			})
+			if storage.Spec.RDS.Table != nil {
+				envs = append(envs, corev1.EnvVar{Name: "RDS_TABLE", Value: *storage.Spec.RDS.Table})
+			}
+		}
 	case capturev1alpha1.CaptureStorageTypePlugin:
 		if storage.Spec.Plugin != nil {
 			envs = append(envs,

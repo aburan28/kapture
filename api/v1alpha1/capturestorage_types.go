@@ -9,7 +9,7 @@ import (
 
 const KindCaptureStorage = "CaptureStorage"
 
-// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS;Plugin
+// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS;RDS;Plugin
 type CaptureStorageType string
 
 const (
@@ -17,6 +17,7 @@ const (
 	CaptureStorageTypeGCS    CaptureStorageType = "GCS"
 	CaptureStorageTypeEFS    CaptureStorageType = "EFS"
 	CaptureStorageTypeEBS    CaptureStorageType = "EBS"
+	CaptureStorageTypeRDS    CaptureStorageType = "RDS"
 	CaptureStorageTypePlugin CaptureStorageType = "Plugin"
 )
 
@@ -78,6 +79,21 @@ type EBSConfig struct {
 	Filesystem *string `json:"filesystem,omitempty"`
 }
 
+// RDSConfig stores captured requests as rows in a PostgreSQL-compatible
+// database (Amazon RDS/Aurora or any Postgres). The agent creates the
+// schema on first use; captured requests are queryable with SQL and
+// replayable like any other backend.
+type RDSConfig struct {
+	// ConnectionSecretRef references a Secret whose "dsn" key holds the
+	// PostgreSQL connection URL
+	// (postgres://user:pass@host:5432/db?sslmode=require).
+	ConnectionSecretRef gwapiv1.SecretObjectReference `json:"connectionSecretRef"`
+	// Table optionally overrides the captured-requests table name.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
+	Table *string `json:"table,omitempty"`
+}
+
 // PluginConfig defines Go plugin storage settings.
 type PluginConfig struct {
 	// +kubebuilder:validation:MinLength=1
@@ -94,6 +110,7 @@ type PluginConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.type != 'GCS' || has(self.gcs)",message="gcs configuration is required when type is GCS"
 // +kubebuilder:validation:XValidation:rule="self.type != 'EFS' || has(self.efs)",message="efs configuration is required when type is EFS"
 // +kubebuilder:validation:XValidation:rule="self.type != 'EBS' || has(self.ebs)",message="ebs configuration is required when type is EBS"
+// +kubebuilder:validation:XValidation:rule="self.type != 'RDS' || has(self.rds)",message="rds configuration is required when type is RDS"
 // +kubebuilder:validation:XValidation:rule="self.type != 'Plugin' || has(self.plugin)",message="plugin configuration is required when type is Plugin"
 type CaptureStorageSpec struct {
 	Type CaptureStorageType `json:"type"`
@@ -105,6 +122,8 @@ type CaptureStorageSpec struct {
 	EFS *EFSConfig `json:"efs,omitempty"`
 	// +optional
 	EBS *EBSConfig `json:"ebs,omitempty"`
+	// +optional
+	RDS *RDSConfig `json:"rds,omitempty"`
 	// +optional
 	Plugin *PluginConfig `json:"plugin,omitempty"`
 	// +optional

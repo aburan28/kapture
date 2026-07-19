@@ -156,6 +156,65 @@ spec:
                 required:
                 - path
                 type: object
+              rds:
+                description: |-
+                  RDSConfig stores captured requests as rows in a PostgreSQL-compatible
+                  database (Amazon RDS/Aurora or any Postgres). The agent creates the
+                  schema on first use; captured requests are queryable with SQL and
+                  replayable like any other backend.
+                properties:
+                  connectionSecretRef:
+                    description: |-
+                      ConnectionSecretRef references a Secret whose "dsn" key holds the
+                      PostgreSQL connection URL
+                      (postgres://user:pass@host:5432/db?sslmode=require).
+                    properties:
+                      group:
+                        default: ""
+                        description: |-
+                          Group is the group of the referent. For example, "gateway.networking.k8s.io".
+                          When unspecified or empty string, core API group is inferred.
+                        maxLength: 253
+                        pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      kind:
+                        default: Secret
+                        description: Kind is kind of the referent. For example "Secret".
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$
+                        type: string
+                      name:
+                        description: Name is the name of the referent.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace is the namespace of the referenced object. When unspecified, the local
+                          namespace is inferred.
+
+                          Note that when a namespace different than the local namespace is specified,
+                          a ReferenceGrant object is required in the referent namespace to allow that
+                          namespace's owner to accept the reference. See the ReferenceGrant
+                          documentation for details.
+
+                          Support: Core
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  table:
+                    description: Table optionally overrides the captured-requests
+                      table name.
+                    pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+                    type: string
+                required:
+                - connectionSecretRef
+                type: object
               retention:
                 description: RetentionPolicy defines common capture retention settings.
                 properties:
@@ -241,6 +300,7 @@ spec:
                 - GCS
                 - EFS
                 - EBS
+                - RDS
                 - Plugin
                 type: string
             required:
@@ -255,6 +315,8 @@ spec:
               rule: self.type != 'EFS' || has(self.efs)
             - message: ebs configuration is required when type is EBS
               rule: self.type != 'EBS' || has(self.ebs)
+            - message: rds configuration is required when type is RDS
+              rule: self.type != 'RDS' || has(self.rds)
             - message: plugin configuration is required when type is Plugin
               rule: self.type != 'Plugin' || has(self.plugin)
           status:

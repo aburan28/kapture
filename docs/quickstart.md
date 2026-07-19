@@ -86,8 +86,16 @@ spec:
 ```
 
 The spoke controller injects a `RequestMirror` filter into the route and
-runs capture agent pods that write compressed JSONL to storage.
+runs capture agent pods that write compressed JSONL to storage (or SQL
+rows with the `RDS` storage type, backed by PostgreSQL/Aurora).
 Credential headers (Authorization, Cookie, …) are redacted by default.
+
+Each agent also maintains streaming statistics over the capture —
+per-window counters, unique clients/flows (HyperLogLog), heavy-hitter
+paths and IPs (Count-Min), body-size and latency quantiles (DDSketch) —
+served at `:8081/stats` and, with `REDIS_ADDR` set on the agent,
+published to Redis (`kapture:stats:{captureID}` plus a
+`...:windows` stream).
 Watch progress:
 
 ```bash

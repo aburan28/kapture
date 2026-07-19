@@ -90,6 +90,10 @@ func validateCaptureStorageSpec(spec capturev1alpha1.CaptureStorageSpec) error {
 		if spec.EBS == nil || strings.TrimSpace(spec.EBS.VolumeID) == "" || strings.TrimSpace(spec.EBS.MountPath) == "" {
 			return fmt.Errorf("ebs configuration is incomplete")
 		}
+	case capturev1alpha1.CaptureStorageTypeRDS:
+		if spec.RDS == nil || strings.TrimSpace(string(spec.RDS.ConnectionSecretRef.Name)) == "" {
+			return fmt.Errorf("rds configuration requires connectionSecretRef")
+		}
 	case capturev1alpha1.CaptureStorageTypePlugin:
 		if spec.Plugin == nil || strings.TrimSpace(spec.Plugin.Path) == "" {
 			return fmt.Errorf("plugin configuration requires plugin.path")

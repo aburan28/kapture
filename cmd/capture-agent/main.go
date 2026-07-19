@@ -285,6 +285,14 @@ func parseStorageConfig(storageType, rawJSON string) (any, error) {
 		cfg.MountPath = firstNonEmpty(cfg.MountPath, os.Getenv("EBS_MOUNT_PATH"))
 		cfg.AgentPod = firstNonEmpty(cfg.AgentPod, os.Getenv("POD_NAME"), os.Getenv("HOSTNAME"))
 		return cfg, nil
+	case "rds":
+		var cfg storage.RDSConfig
+		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("parse rds config: %w", err)
+		}
+		cfg.DSN = firstNonEmpty(cfg.DSN, os.Getenv("RDS_DSN"))
+		cfg.Table = firstNonEmpty(cfg.Table, os.Getenv("RDS_TABLE"))
+		return cfg, nil
 	case "plugin":
 		var cfg storage.PluginConfig
 		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {

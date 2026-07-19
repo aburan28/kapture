@@ -32,6 +32,12 @@ func NewWriterFactory(storageType string, config any) (WriterFactory, error) {
 			return nil, err
 		}
 		return NewEBSWriterFactory(cfg)
+	case "rds":
+		cfg, err := asRDSConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		return NewRDSWriterFactory(context.Background(), cfg)
 	case "plugin":
 		cfg, err := asPluginConfig(config)
 		if err != nil {
@@ -110,5 +116,19 @@ func asPluginConfig(config any) (PluginConfig, error) {
 		return *cfg, nil
 	default:
 		return PluginConfig{}, fmt.Errorf("invalid config type %T for plugin", config)
+	}
+}
+
+func asRDSConfig(config any) (RDSConfig, error) {
+	switch cfg := config.(type) {
+	case RDSConfig:
+		return cfg, nil
+	case *RDSConfig:
+		if cfg == nil {
+			return RDSConfig{}, fmt.Errorf("nil rds config")
+		}
+		return *cfg, nil
+	default:
+		return RDSConfig{}, fmt.Errorf("invalid rds config type %T", config)
 	}
 }

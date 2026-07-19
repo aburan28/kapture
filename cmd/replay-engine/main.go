@@ -46,6 +46,8 @@ type config struct {
 	// Storage
 	storageType string
 	bucket      string
+	rdsDSN      string
+	rdsTable    string
 	region      string
 	prefix      string
 	mountPath   string
@@ -111,11 +113,13 @@ func parseFlags() config {
 	var cfg config
 
 	// Storage flags.
-	flag.StringVar(&cfg.storageType, "storage-type", "", "Storage backend: s3, gcs, efs, ebs")
+	flag.StringVar(&cfg.storageType, "storage-type", "", "Storage backend: s3, gcs, efs, ebs, rds")
 	flag.StringVar(&cfg.bucket, "bucket", "", "S3/GCS bucket name")
 	flag.StringVar(&cfg.region, "region", "", "AWS region (S3 only)")
 	flag.StringVar(&cfg.prefix, "prefix", "", "Storage prefix/path")
 	flag.StringVar(&cfg.mountPath, "mount-path", "", "Filesystem mount path (EFS/EBS)")
+	flag.StringVar(&cfg.rdsDSN, "rds-dsn", os.Getenv("RDS_DSN"), "PostgreSQL connection URL (RDS backend); defaults to RDS_DSN")
+	flag.StringVar(&cfg.rdsTable, "rds-table", os.Getenv("RDS_TABLE"), "Captured-requests table (RDS backend)")
 
 	// Capture selection flags.
 	flag.StringVar(&cfg.captureID, "capture-id", "", "Capture ID to replay (required)")
@@ -534,6 +538,12 @@ func buildReaderConfig(cfg config) map[string]any {
 	}
 	if cfg.mountPath != "" {
 		m["mountPath"] = cfg.mountPath
+	}
+	if cfg.rdsDSN != "" {
+		m["dsn"] = cfg.rdsDSN
+	}
+	if cfg.rdsTable != "" {
+		m["table"] = cfg.rdsTable
 	}
 	return m
 }

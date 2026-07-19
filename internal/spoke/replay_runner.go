@@ -187,6 +187,16 @@ func buildReplayArgs(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1
 			return nil, fmt.Errorf("storage %s has type EBS but no ebs config", storage.Name)
 		}
 		args = append(args, "--storage-type", "ebs", "--mount-path", storage.Spec.EBS.MountPath)
+	case capturev1alpha1.CaptureStorageTypeRDS:
+		if storage.Spec.RDS == nil {
+			return nil, fmt.Errorf("storage %s has type RDS but no rds config", storage.Name)
+		}
+		// The DSN reaches the worker via the RDS_DSN env var sourced from
+		// the connection secret (see replayEnv).
+		args = append(args, "--storage-type", "rds")
+		if storage.Spec.RDS.Table != nil && *storage.Spec.RDS.Table != "" {
+			args = append(args, "--rds-table", *storage.Spec.RDS.Table)
+		}
 	default:
 		return nil, fmt.Errorf("storage type %q is not supported for replay", storage.Spec.Type)
 	}

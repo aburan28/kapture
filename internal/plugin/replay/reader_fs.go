@@ -222,6 +222,8 @@ func NewReaderFromConfig(ctx context.Context, storageType string, config map[str
 		return newGCSReaderFromConfig(ctx, config)
 	case "efs", "ebs":
 		return newFSReaderFromConfig(config)
+	case "rds":
+		return newRDSReaderFromConfig(ctx, config)
 	default:
 		return nil, fmt.Errorf("unsupported storage type for reading: %q", storageType)
 	}

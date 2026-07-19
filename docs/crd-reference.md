@@ -58,6 +58,7 @@ config block is required (CEL).
 | `GCS` | `gcs` | `bucket`, `credentialsSecretRef`; optional `prefix` |
 | `EFS` | `efs` | `fileSystemID`, `mountPath` (absolute); optional `directory` |
 | `EBS` | `ebs` | `volumeID`, `mountPath` (absolute); optional `filesystem` |
+| `RDS` | `rds` | `connectionSecretRef` (Secret with a `dsn` key holding a PostgreSQL URL); optional `table`. Captured requests become SQL-queryable rows |
 | `Plugin` | `plugin` | `path`; optional `symbol`, `config` (JSON) |
 
 Optional `retention.maxAge` / `retention.maxSize`. Status: `phase`
