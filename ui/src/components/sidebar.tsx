@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/", label: "Dashboard", icon: DashboardIcon },
   { href: "/captures", label: "Captures", icon: CaptureIcon },
+  { href: "/analytics", label: "Analytics", icon: AnalyticsIcon },
   { href: "/loadtests", label: "Load Tests", icon: LoadTestIcon },
   { href: "/replays", label: "Replays", icon: ReplayIcon },
   { href: "/spokes", label: "Spokes", icon: SpokeIcon },
@@ -160,6 +161,24 @@ function ReplayIcon({ active }: { active: boolean }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M12 9.75 14.25 12m0 0L12 14.25M14.25 12H4.5m4.664-6.876A8.25 8.25 0 1 1 5.25 12"
+      />
+    </svg>
+  );
+}
+
+function AnalyticsIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 ${active ? "text-indigo-400" : "text-gray-500"}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
       />
     </svg>
   );

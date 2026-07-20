@@ -7,6 +7,7 @@ import {
   TrafficReplay,
   Cell,
 } from "./types";
+import { StatsSnapshot, WindowCounts } from "./stats-types";
 
 export const mockSpokes: Spoke[] = [
   {
@@ -606,3 +607,78 @@ export const mockReplays: TrafficReplay[] = [
     },
   },
 ];
+
+function mockWindow(minutesAgo: number, requests: number): WindowCounts {
+  const start = new Date(Date.now() - minutesAgo * 60000);
+  start.setSeconds(0, 0);
+  const get = Math.round(requests * 0.62);
+  const post = Math.round(requests * 0.27);
+  const put = Math.round(requests * 0.06);
+  const del = Math.round(requests * 0.03);
+  return {
+    start: start.toISOString(),
+    end: new Date(start.getTime() + 60000).toISOString(),
+    requests,
+    bytes: requests * 840,
+    meanBytes: 840,
+    byMethod: {
+      GET: get,
+      POST: post,
+      PUT: put,
+      DELETE: del,
+      PATCH: requests - get - post - put - del,
+    },
+    byProtocol: { HTTP: Math.round(requests * 0.9), gRPC: Math.round(requests * 0.1) },
+    newFlows: Math.max(2, Math.round(requests * 0.04)),
+  };
+}
+
+// A daily-traffic-shaped series of completed windows plus an in-progress
+// window, matching what a busy capture agent reports.
+const windowShape = [1180, 1240, 1315, 1290, 1410, 1520, 1485, 1630, 1745, 1690, 1820, 1930, 2140, 2050, 1960];
+
+export const mockStatsSnapshot: StatsSnapshot = {
+  generatedAt: new Date().toISOString(),
+  completedWindows: windowShape.map((requests, i) =>
+    mockWindow(windowShape.length - i, requests)
+  ),
+  currentWindow: {
+    ...mockWindow(0, 940),
+    end: undefined,
+  },
+  uniqueClientIPs: 4287,
+  uniqueFlows: 11902,
+  topPaths: [
+    { key: "/api/v1/orders", count: 9421 },
+    { key: "/api/v1/products/search", count: 7256 },
+    { key: "/api/v1/cart", count: 5110 },
+    { key: "/api/v1/orders/{id}/status", count: 3874 },
+    { key: "/healthz", count: 2930 },
+    { key: "/api/v1/users/me", count: 2411 },
+    { key: "/api/v1/checkout", count: 1980 },
+  ],
+  topClients: [
+    { key: "10.0.14.7", count: 6112 },
+    { key: "10.0.9.44", count: 4720 },
+    { key: "10.2.3.18", count: 3391 },
+    { key: "10.0.14.9", count: 2258 },
+    { key: "10.1.7.203", count: 1904 },
+  ],
+  bodySizeBytes: {
+    count: 292840,
+    mean: 1490,
+    p50: 618,
+    p90: 4230,
+    p99: 48100,
+    max: 1048576,
+  },
+  handleLatencyMicros: {
+    count: 292840,
+    mean: 184,
+    p50: 121,
+    p90: 342,
+    p99: 1180,
+    max: 22400,
+  },
+  flowFilterFill: 0.078,
+};

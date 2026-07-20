@@ -35,6 +35,7 @@ import {
   TrafficReplay,
   Cell,
 } from "./types";
+import { StatsSnapshot } from "./stats-types";
 import {
   mockCaptures,
   mockStorages,
@@ -43,6 +44,7 @@ import {
   mockLoadTests,
   mockReplays,
   mockCells,
+  mockStatsSnapshot,
 } from "./mock-data";
 
 // ---------------------------------------------------------------------------
@@ -187,6 +189,42 @@ export async function listCells(): Promise<Cell[]> {
   }
 
   throw new Error("gRPC transport not yet implemented");
+}
+
+// ---------------------------------------------------------------------------
+// Streaming statistics
+// ---------------------------------------------------------------------------
+
+// AGENT_STATS_URL points directly at a capture agent's stats endpoint
+// (e.g. "http://capture-agent:8081/stats", or a port-forward). When set,
+// the analytics dashboard shows live data; otherwise mock data.
+const AGENT_STATS_URL = process.env.AGENT_STATS_URL;
+
+export interface CaptureStatsResult {
+  snapshot: StatsSnapshot;
+  mock: boolean;
+}
+
+// getCaptureStats returns the streaming-statistics snapshot for a
+// capture: flow-window counters, cardinality estimates, heavy hitters,
+// and quantile sketches, as served by the agent's /stats endpoint.
+export async function getCaptureStats(
+  _captureId: string
+): Promise<CaptureStatsResult> {
+  if (AGENT_STATS_URL) {
+    const resp = await fetch(AGENT_STATS_URL, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) {
+      throw new Error(`agent stats endpoint returned ${resp.status}`);
+    }
+    return { snapshot: (await resp.json()) as StatsSnapshot, mock: false };
+  }
+  return {
+    snapshot: { ...mockStatsSnapshot, generatedAt: new Date().toISOString() },
+    mock: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
