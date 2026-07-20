@@ -183,6 +183,28 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 		envs = append(envs, corev1.EnvVar{Name: "DATABASE_URL", Value: databaseURL})
 	}
 
+	// Statistics publishing: the spoke's own Redis configuration is passed
+	// through to every agent it deploys.
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		envs = append(envs, corev1.EnvVar{Name: "REDIS_ADDR", Value: redisAddr})
+		if redisDB := os.Getenv("REDIS_DB"); redisDB != "" {
+			envs = append(envs, corev1.EnvVar{Name: "REDIS_DB", Value: redisDB})
+		}
+		if secretName := os.Getenv("REDIS_PASSWORD_SECRET_NAME"); secretName != "" {
+			secretKey := os.Getenv("REDIS_PASSWORD_SECRET_KEY")
+			if secretKey == "" {
+				secretKey = "REDIS_PASSWORD"
+			}
+			envs = append(envs, corev1.EnvVar{
+				Name: "REDIS_PASSWORD",
+				ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  secretKey,
+				}},
+			})
+		}
+	}
+
 	switch storage.Spec.Type {
 	case capturev1alpha1.CaptureStorageTypeS3:
 		if storage.Spec.S3 != nil {

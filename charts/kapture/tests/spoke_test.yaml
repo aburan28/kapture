@@ -89,6 +89,43 @@ tests:
           path: spec.template.spec.containers[0].env[3].value
           value: "cell-us-east-1a"
 
+  - it: should pass Redis statistics configuration to the spoke
+    template: spoke-deployment.yaml
+    set:
+      stats.redis.addr: "redis.observability.svc:6379"
+      stats.redis.db: 2
+      stats.redis.passwordSecretName: "redis-auth"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_ADDR
+            value: "redis.observability.svc:6379"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_DB
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_PASSWORD_SECRET_NAME
+            value: "redis-auth"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_PASSWORD_SECRET_KEY
+            value: "REDIS_PASSWORD"
+
+  - it: should not set Redis env without stats.redis.addr
+    template: spoke-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_ADDR
+          any: true
+
   - it: should render spoke deployment with nodeSelector and tolerations
     template: spoke-deployment.yaml
     set:

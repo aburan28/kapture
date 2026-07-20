@@ -3,6 +3,19 @@
 # -- Install CRDs with the chart
 installCRDs: true
 
+stats:
+  redis:
+    # -- Redis host:port for streaming-statistics publishing from capture
+    # agents (kapture:stats:{captureID} snapshots + window streams);
+    # empty disables publishing. Agents always serve /stats regardless.
+    addr: ""
+    # -- Redis logical database number.
+    db: 0
+    # -- Existing Secret holding the Redis password (optional).
+    passwordSecretName: ""
+    # -- Key inside passwordSecretName with the password.
+    passwordSecretKey: "REDIS_PASSWORD"
+
 history:
   # -- Enable PostgreSQL/RDS-backed capture history metadata.
   enabled: false

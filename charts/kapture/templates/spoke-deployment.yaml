@@ -54,6 +54,20 @@ spec:
               value: {{ .Values.spoke.hub.tls.serverName | quote }}
             {{- end }}
             {{- end }}
+            {{- if .Values.stats.redis.addr }}
+            # Passed through to capture agent pods for statistics
+            # publishing.
+            - name: REDIS_ADDR
+              value: {{ .Values.stats.redis.addr | quote }}
+            - name: REDIS_DB
+              value: {{ .Values.stats.redis.db | quote }}
+            {{- if .Values.stats.redis.passwordSecretName }}
+            - name: REDIS_PASSWORD_SECRET_NAME
+              value: {{ .Values.stats.redis.passwordSecretName | quote }}
+            - name: REDIS_PASSWORD_SECRET_KEY
+              value: {{ .Values.stats.redis.passwordSecretKey | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.history.enabled }}
             {{- if .Values.history.localPostgres.enabled }}
             - name: DATABASE_URL
