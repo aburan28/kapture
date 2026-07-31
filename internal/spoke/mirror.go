@@ -153,7 +153,7 @@ func buildGRPCMirrorFilter(namespace, serviceName string) gwapiv1.GRPCRouteFilte
 			BackendRef: gwapiv1.BackendObjectReference{
 				Name:      gwapiv1.ObjectName(serviceName),
 				Namespace: &ns,
-				Port:      ptrTo(captureAgentHTTPPort),
+				Port:      ptrTo(captureAgentGRPCPort),
 			},
 		},
 	}
@@ -210,4 +210,3 @@ func removeGRPCMirrorFilters(filters []gwapiv1.GRPCRouteFilter, agentServiceName
 func ptrTo[T any](v T) *T {
 	return &v
 }
-
