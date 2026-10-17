@@ -12,7 +12,8 @@ Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes
 [Troubleshooting](docs/troubleshooting.md) ·
 [Multi-Cell Load Testing](docs/multi-cell-load-testing.md) ·
 [Replay Engine ABI](docs/replay-engine-abi.md) ·
-[TLS & Rotation](docs/tls-rotation.md)
+[TLS & Rotation](docs/tls-rotation.md) ·
+[eBPF L7 Capture Proposal](docs/design/ebpf-l7-capture.md)
 
 ### Key Features
 
