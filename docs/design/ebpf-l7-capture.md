@@ -20,17 +20,59 @@ connection identities, and protocol dependencies. A selected L7 exchange is
 exported with enough evidence to explain and reproduce its reconstruction.
 Capture selection, retention, and reconstruction use the same graph.
 
-The proposed differentiator is dependency-preserving retention with explicit
-fidelity reporting. TLS plaintext capture and protocol tracing are established
-techniques; this proposal makes no first-of-its-kind or patent novelty claim.
+Use eCapture as the capture-plane baseline. The proposed addition is
+dependency-preserving L7 retention and cross-layer provenance. TLS plaintext
+capture, triggered history buffers, stream reassembly, and gap handling are
+established techniques; this proposal makes no first-of-its-kind or patent
+novelty claim. See the [eCapture / FlowScope comparison and measurement protocol](ebpf-l7-capture-comparison.md)
+for pinned sources, capability differences, and the status of measurements.
+
+## eCapture implementation baseline
+
+Model the collector on [eCapture V2 at afcc9345ff8f09f96811a158cf768d284b4c7e1b](https://github.com/gojue/ecapture/tree/afcc9345ff8f09f96811a158cf768d284b4c7e1b),
+rather than starting a parallel TLS probe implementation. Reuse its library
+resolution, version-specific adapters, event decoding, packet capture, and
+output lifecycle where their contracts satisfy the reconstruction requirements.
+
+The primary packet export should follow eCapture's existing packet-plus-secret
+path: retain observed packets and embed usable TLS secrets in PCAPNG. Its
+[PCAPNG session](https://github.com/gojue/ecapture/blob/afcc9345ff8f09f96811a158cf768d284b4c7e1b/internal/output/pcapng/session.go)
+already serializes packet and secret streams. Synthetic plaintext packets remain
+an optional derivative, not the foundation of the capture format.
+
+Keep two evidence paths: decrypt captured packet streams where keys and context
+are available, or consume supported plaintext events where they are not. Both
+feed the same reconstruction/quality layer. Do not assume upstream modes already
+provide simultaneous packet, plaintext, and semantic taps in one session; a
+versioned collector adapter must define and test that contract before use.
+
+Tap structured events before terminal formatting. The pinned
+[OpenSSL event ABI](https://github.com/gojue/ecapture/blob/afcc9345ff8f09f96811a158cf768d284b4c7e1b/internal/probe/openssl/event.go)
+has a 16 KiB payload limit and does not carry all of Loom's proposed lifetime,
+position, original-length, or loss-scope fields. Add explicit metadata and
+chunking where needed; a wrapper cannot infer missing bytes or exact ordering
+from a full-sized event. A full-sized event alone does not prove that the
+original operation was completely captured.
+
+The implementation boundary should be a pinned collector subprocess or a small
+maintained fork with a versioned event-export interface. eCapture's `internal/`
+packages are not an external Go library API. Its
+[generic protobuf encoder](https://github.com/gojue/ecapture/blob/afcc9345ff8f09f96811a158cf768d284b4c7e1b/internal/output/encoders/protobuf_encoder.go)
+is a placeholder at this revision; do not assume it supplies a ready-made Loom
+ABI. Preserve upstream attribution when reusing source.
+
+Initially retain eCapture's perf-event transport and report its loss signals.
+Measure before replacing it with BPF ring buffers or changing allocation and
+batching behavior. Keep capture cost separate from decoding, checkpointing, and
+retention cost in every benchmark.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A["TC / TCX packet hooks"] --> D["Reconstruction graph"]
-    B["Socket lifecycle and I/O hooks"] --> D
-    C["TLS / protocol uprobes"] --> D
+    A["eCapture packet and TLS-secret path"] --> D["Reconstruction graph"]
+    B["Socket identity and loss metadata extensions"] --> D
+    C["eCapture plaintext adapters / protocol taps"] --> D
     D --> E["User-space reassembly and decoders"]
     E --> F["Dependency-preserving retention"]
     F --> G["L7 capture bundle and replay projection"]
@@ -197,8 +239,10 @@ unknown event loss, late attachment, state eviction, and unsupported decoding.
 Allocate producer sequence numbers before attempted export. Maintain cumulative
 loss counters and capture epochs independently of the event channel, reconcile
 them periodically, and report close/restart intervals without trustworthy final
-watermarks as uncertain. Ring-buffer reservation can fail, so a loss notification
-sent only through that same buffer is insufficient. See
+watermarks as uncertain. Account for perf-reader lost samples in the initial
+eCapture-based collector. If a BPF ring-buffer variant is introduced, reservation
+can fail, so a loss notification sent only through that same buffer is
+insufficient. See
 [Linux BPF ring-buffer documentation](https://kernel.org/doc/html/latest/bpf/ringbuf.html).
 
 If loss scope cannot be assigned to a particular connection, conservatively
@@ -268,8 +312,10 @@ stream replay and response validation need separate engine capabilities.
 1. Define the versioned span, gap, binding, and bundle schemas. Implement
    deterministic user-space reconstruction from fixtures before attaching live
    probes. Establish the redaction/export policy and replay eligibility rules.
-2. Add TCP identity and bounded packet/plaintext collection for a pinned OpenSSL
-   adapter and HTTP/1.1. Verify retry, partial-I/O, ordering, and lifecycle behavior.
+2. Integrate the pinned eCapture collector for OpenSSL and HTTP/1.1, adding the
+   structured metadata its ABI does not yet expose. Verify retry, partial-I/O,
+   ordering, and lifecycle behavior against unmodified eCapture and its upstream
+   TLS benchmark before adding retention features.
 3. Add HTTP/2 and gRPC framing, directional HPACK checkpoints, and dependency
    retention. Validate selected-exchange replay after unrelated bodies expire.
 4. Add object/file bundle upload and request projection, then integrate node
@@ -292,9 +338,12 @@ throughput or overhead result is claimed by this proposal.
 
 ## Related work
 
-[eCapture](https://github.com/gojue/ecapture) already provides TLS plaintext,
-key-log, and PCAPNG capture. [Pixie](https://blog.px.dev/ebpf-tls-tracing-past-present-future/)
-documents TLS tracing and connection-association challenges. Loom builds on these
-established observation techniques and proposes a shared dependency graph for
-reconstruction, retention, and fidelity reporting. A separate prior-art review
-would be needed to assess novelty beyond this design proposal.
+[eCapture](https://github.com/gojue/ecapture) is the proposed implementation
+baseline, providing TLS plaintext, key-log, PCAPNG capture, and existing HTTP
+decoders. [emmericp/FlowScope](https://github.com/emmericp/FlowScope) establishes
+triggered packet-history capture; [p13marc/flowscope](https://github.com/p13marc/flowscope)
+already provides TCP gap handling and HTTP/2/gRPC decoding. [Pixie](https://blog.px.dev/ebpf-tls-tracing-past-present-future/)
+documents TLS tracing and connection-association challenges. Evaluate Loom on its
+dependency-complete exchange export and provenance rather than claiming these
+existing features as inventions. A separate prior-art review would be needed to
+assess novelty beyond this design proposal.
