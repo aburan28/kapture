@@ -9,7 +9,8 @@ fn main() {
     let request = format!(
         "POST /bench HTTP/1.1\r\nHost: benchmark\r\nContent-Length: {size}\r\n\r\n{}",
         "x".repeat(size)
-    ).into_bytes();
+    )
+    .into_bytes();
     let response = b"HTTP/1.1 204 No Content\r\n\r\n";
     let ts = Timestamp::new(1700000000, 0);
     let mut count = 0;
@@ -26,5 +27,9 @@ fn main() {
     }
     let elapsed = start.elapsed();
     assert_eq!(count, iterations);
-    println!("flowscope,http1,{size},{iterations},{count},{},{:.2}", request.len() + response.len(), elapsed.as_nanos() as f64 / iterations as f64);
+    println!(
+        "flowscope,http1,{size},{iterations},{count},{},{:.2}",
+        request.len() + response.len(),
+        elapsed.as_nanos() as f64 / iterations as f64
+    );
 }

@@ -206,6 +206,11 @@ replay output, and shutdown. Missing root/BTF/probes are failures once selected.
 The `eBPF Native Capture` workflow builds the pinned image and runs this test
 with a host PID namespace on an isolated Linux runner.
 
+Initial local validation also opened synthetic HTTP/1, HTTP/2, and gRPC PCAPNG
+fixtures with TShark from Debian Bookworm: it identified their application protocols, request
+paths and response status codes. That validates the exported packet format,
+not the upstream BPF attachment path.
+
 The end-to-end recorded-observation test uses the real evidence writer and
 existing replay reader/sender. Typed protocol tests exercise WebSocket/protobuf,
 readiness, cancellation, malformed frames, and process lifetime checks. Neither

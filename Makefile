@@ -38,7 +38,7 @@ benchmark-l7:
 	go test ./internal/l7 -run '^$$' -bench . -benchmem -count=5
 
 benchmark-flowscope:
-	bash tools/benchmark-l7.sh
+	@bash tools/benchmark-l7.sh
 
 test:
 	go test ./...
