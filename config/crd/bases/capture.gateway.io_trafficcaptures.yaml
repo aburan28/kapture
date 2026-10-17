@@ -77,6 +77,12 @@ spec:
                 - message: minReplicas must not exceed maxReplicas
                   rule: '!has(self.minReplicas) || !has(self.maxReplicas) || self.minReplicas
                     <= self.maxReplicas'
+              backend:
+                default: Mirror
+                enum:
+                - Mirror
+                - EBPF
+                type: string
               capture:
                 description: CaptureSettings controls how mirrored traffic is recorded.
                 properties:
@@ -107,6 +113,56 @@ spec:
                     items:
                       type: string
                     type: array
+                type: object
+              ebpf:
+                description: EBPFCaptureSettings controls a pod-scoped, node-local
+                  OpenSSL collector.
+                properties:
+                  history:
+                    default: 30s
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    type: string
+                  historyBytes:
+                    default: 33554432
+                    format: int64
+                    maximum: 2147483648
+                    minimum: 1048576
+                    type: integer
+                  libraryPath:
+                    description: LibraryPath overrides OpenSSL discovery in /proc/PID/maps.
+                    pattern: ^/.*
+                    type: string
+                  mapPages:
+                    default: 256
+                    format: int32
+                    maximum: 8192
+                    minimum: 8
+                    type: integer
+                  memoryBytes:
+                    default: 134217728
+                    format: int64
+                    maximum: 2147483648
+                    minimum: 1048576
+                    type: integer
+                  pcap:
+                    default: true
+                    description: PCAP exports a labeled reconstructed plaintext PCAPNG,
+                      never a wire trace.
+                    type: boolean
+                  pid:
+                    description: PID optionally selects one host PID belonging to
+                      the target pod.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  triggerStatus:
+                    description: |-
+                      TriggerStatus keeps recent exchanges on the same connection when this
+                      HTTP status is reached; zero exports every exchange. gRPC errors trigger too.
+                    format: int32
+                    maximum: 599
+                    minimum: 0
+                    type: integer
                 type: object
               filters:
                 description: CaptureFilters narrows which traffic is mirrored.
@@ -210,6 +266,16 @@ spec:
             - storageRef
             - targetRef
             type: object
+            x-kubernetes-validations:
+            - message: EBPF requires a core Pod target in the capture namespace
+              rule: '!has(self.backend) || self.backend != ''EBPF'' || (size(self.targetRef.group)
+                == 0 && self.targetRef.kind == ''Pod'')'
+            - message: ebpf settings require the EBPF backend
+              rule: '!has(self.ebpf) || (has(self.backend) && self.backend == ''EBPF'')'
+            - message: EBPF is node-local and does not support agent autoscaling
+              rule: '!has(self.backend) || self.backend != ''EBPF'' || !has(self.agent)'
+            - message: capture backend is immutable
+              rule: '!has(oldSelf.backend) || self.backend == oldSelf.backend'
           status:
             description: TrafficCaptureStatus defines the observed state of TrafficCapture.
             properties:

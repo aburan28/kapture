@@ -1,0 +1,43 @@
+name: eBPF Native Capture
+on:
+  pull_request:
+    paths:
+      - 'internal/l7/**'
+      - 'internal/ecapture/**'
+      - 'internal/ebpf/**'
+      - 'internal/storage/**'
+      - 'cmd/capture-agent/**'
+      - 'Dockerfile.ebpf'
+      - '.github/workflows/ebpf.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/l7/**'
+      - 'internal/ecapture/**'
+      - 'internal/ebpf/**'
+      - 'internal/storage/**'
+      - 'cmd/capture-agent/**'
+      - 'Dockerfile.ebpf'
+      - '.github/workflows/ebpf.yaml'
+permissions:
+  contents: read
+jobs:
+  native-openssl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Build pinned eCapture and Kapture image
+        run: docker build -f Dockerfile.ebpf -t kapture/ebpf-agent:test .
+      - name: Build native test executable
+        run: CGO_ENABLED=0 go test -c -o /tmp/kapture-native.test ./internal/ebpf
+      - name: Capture real OpenSSL traffic through BPF
+        run: |
+          docker run --rm --privileged --pid=host \
+            -e KAPTURE_NATIVE_EBPF=1 \
+            --mount type=bind,src=/tmp/kapture-native.test,dst=/native.test,readonly \
+            --entrypoint /native.test kapture/ebpf-agent:test \
+            -test.run '^TestNativeOpenSSLCapture$' -test.v -test.timeout=120s

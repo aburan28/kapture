@@ -87,6 +87,9 @@ func (r *TrafficCaptureReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.setPhaseWithCondition(ctx, tc, capturev1alpha1.TrafficCapturePhasePending,
 			"StorageNotReady", fmt.Sprintf("CaptureStorage %s is not Ready", storageKey))
 	}
+	if isEBPF(tc) {
+		return r.reconcileEBPF(ctx, tc, storage)
+	}
 
 	// Step 2: Create/update capture agent Deployment
 	deploy := BuildDeployment(tc, storage)
@@ -137,9 +140,11 @@ func (r *TrafficCaptureReconciler) reconcileDelete(ctx context.Context, tc *capt
 	logger := log.FromContext(ctx)
 
 	// Remove mirror filter from target route
-	if err := RemoveMirrorFilter(ctx, r.Client, tc); err != nil {
-		logger.Error(err, "failed to remove mirror filter during cleanup")
-		// Continue with cleanup even if mirror filter removal fails
+	if !isEBPF(tc) {
+		if err := RemoveMirrorFilter(ctx, r.Client, tc); err != nil {
+			logger.Error(err, "failed to remove mirror filter during cleanup")
+			// Continue with cleanup even if mirror filter removal fails
+		}
 	}
 
 	// Remove finalizer to allow deletion (owned resources are garbage collected)
@@ -220,8 +225,10 @@ func captureExpired(tc *capturev1alpha1.TrafficCapture) (bool, time.Duration) {
 // completeCapture stops mirroring and removes agent resources once the
 // capture duration has elapsed. Captured data remains in storage.
 func (r *TrafficCaptureReconciler) completeCapture(ctx context.Context, tc *capturev1alpha1.TrafficCapture) (ctrl.Result, error) {
-	if err := RemoveMirrorFilter(ctx, r.Client, tc); err != nil {
-		return ctrl.Result{}, fmt.Errorf("remove mirror filter: %w", err)
+	if !isEBPF(tc) {
+		if err := RemoveMirrorFilter(ctx, r.Client, tc); err != nil {
+			return ctrl.Result{}, fmt.Errorf("remove mirror filter: %w", err)
+		}
 	}
 
 	meta := metav1.ObjectMeta{Name: AgentDeploymentName(tc), Namespace: tc.Namespace}
@@ -348,4 +355,3 @@ func (r *TrafficCaptureReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Complete(r)
 }
-
