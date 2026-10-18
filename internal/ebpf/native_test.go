@@ -3,6 +3,7 @@ package ebpf
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -75,6 +76,30 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 	go func() {
 		done <- Run(ctx, Config{CaptureID: "native/capture", Binary: binary, PID: server.Process.Pid, HealthAddress: healthAddress, Export: l7.ExportConfig{CaptureID: "native/capture", Writer: writer, Artifacts: factory, IncludeHeaders: true, IncludeBody: true, PCAP: true}})
 	}()
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		// Only counters and quality are printed; captured headers/bodies never
+		// enter CI diagnostics, even when a producer or decoder fails.
+		files, _ := filepath.Glob(filepath.Join(output, "evidence/native/capture", "*", "*.json"))
+		for _, file := range files {
+			data, _ := os.ReadFile(file)
+			if filepath.Base(filepath.Dir(file)) == "sessions" {
+				t.Logf("capture session: %s", data)
+				continue
+			}
+			var x l7.Exchange
+			if json.Unmarshal(data, &x) == nil {
+				t.Logf("exchange quality: requestComplete=%t responseComplete=%t status=%d quality=%+v", x.Request.Complete, x.Response.Complete, x.Response.Status, x.Quality)
+			}
+		}
+	}()
 	ready := false
 	for !ready {
 		select {
@@ -109,6 +134,7 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 		}
 	}
 	var captured *storage.CapturedRequest
+	lastDiagnostic := time.Now()
 	for captured == nil {
 		reader, _ := replay.NewFilesystemReader(replay.FilesystemReaderConfig{MountPath: output})
 		if err := reader.Open(ctx, replay.ReadOptions{CaptureID: "native/capture"}); err == nil {
@@ -124,6 +150,15 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("actual BPF observations never produced replay data")
 		case <-time.After(100 * time.Millisecond):
+			if time.Since(lastDiagnostic) > 5*time.Second {
+				lastDiagnostic = time.Now()
+				metricsClient := &http.Client{Timeout: time.Second}
+				if metrics, err := metricsClient.Get("http://" + healthAddress + "/metrics"); err == nil {
+					data, _ := io.ReadAll(io.LimitReader(metrics.Body, 4096))
+					metrics.Body.Close()
+					t.Logf("native counters: %s", data)
+				}
+			}
 		}
 	}
 	if captured.Path != "/fixture" || http.Header(captured.Headers).Get("Authorization") != "[REDACTED]" {
