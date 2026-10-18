@@ -8,6 +8,7 @@ import (
 
 	"github.com/kapture-io/kapture/pkg/backend"
 	"github.com/kapture-io/kapture/pkg/backend/filesystem"
+	"github.com/kapture-io/kapture/pkg/capture"
 )
 
 func TestHTTPDestinationAcknowledgesEvidenceAndRecordsOnlyMetadata(t *testing.T) {
@@ -15,7 +16,7 @@ func TestHTTPDestinationAcknowledgesEvidenceAndRecordsOnlyMetadata(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewTLSServer(backend.NewHandler(store))
+	server := httptest.NewTLSServer(backend.NewHandler(opaqueArtifactBackend{store}))
 	defer server.Close()
 	recorder := &fakeArtifactRecorder{}
 	factory, err := NewHTTPWriterFactory(context.Background(), HTTPConfig{Endpoint: server.URL, HTTPClient: server.Client(), ArtifactRecorder: recorder, CaptureNamespace: "app", CaptureName: "session"})
@@ -23,7 +24,7 @@ func TestHTTPDestinationAcknowledgesEvidenceAndRecordsOnlyMetadata(t *testing.T)
 		t.Fatal(err)
 	}
 	r, err := factory.PutArtifact(context.Background(), "app/session", "exchange.json", []byte("opaque evidence"), "application/json")
-	if err != nil || r.SHA256 == "" || recorder.calls != 1 || recorder.artifact.CaptureNamespace != "app" || recorder.artifact.Key != r.Key {
+	if err != nil || r.SHA256 == "" || recorder.calls != 1 || recorder.artifact.StorageBackend != "http" || recorder.artifact.Bucket != "" || recorder.artifact.CaptureNamespace != "app" || recorder.artifact.Key != r.Key {
 		t.Fatalf("artifact metadata not preserved: %+v %v", r, err)
 	}
 	factory.config.ArtifactRecorder = failingEvidenceRecorder{}
@@ -40,4 +41,14 @@ func TestHTTPDestinationAcknowledgesEvidenceAndRecordsOnlyMetadata(t *testing.T)
 	if err := writer.Write(context.Background(), &CapturedRequest{ID: "closed"}); !errors.Is(err, ErrWriterClosed) {
 		t.Fatalf("closed writer accepted a record: %v", err)
 	}
+}
+
+// A provider may return an opaque key without an underlying storage type.
+// Its location must still be usable by the generic history recorder.
+type opaqueArtifactBackend struct{ *filesystem.Store }
+
+func (b opaqueArtifactBackend) PutArtifact(ctx context.Context, id, name string, data []byte, typ string) (capture.Artifact, error) {
+	a, err := b.Store.PutArtifact(ctx, id, name, data, typ)
+	a.StorageBackend = ""
+	return a, err
 }

@@ -54,6 +54,9 @@ func (f *HTTPWriterFactory) PutArtifact(ctx context.Context, id, name string, da
 	if err != nil {
 		return r, err
 	}
+	if r.StorageBackend == "" {
+		r.StorageBackend = "http"
+	}
 	r.CaptureNamespace, r.CaptureName = f.config.CaptureNamespace, f.config.CaptureName
 	if f.config.ArtifactRecorder != nil {
 		if err := f.config.ArtifactRecorder.RecordArtifact(ctx, r); err != nil {

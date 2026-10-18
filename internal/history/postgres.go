@@ -106,9 +106,6 @@ func (r *PostgresRepository) RecordArtifact(ctx context.Context, artifact storag
 	if strings.TrimSpace(artifact.CaptureID) == "" {
 		return errors.New("artifact capture ID is required")
 	}
-	if strings.TrimSpace(artifact.Bucket) == "" {
-		return errors.New("artifact bucket is required")
-	}
 	if strings.TrimSpace(artifact.Key) == "" {
 		return errors.New("artifact key is required")
 	}
@@ -117,6 +114,12 @@ func (r *PostgresRepository) RecordArtifact(ctx context.Context, artifact storag
 	}
 	if artifact.StorageBackend == "" {
 		artifact.StorageBackend = "s3"
+	}
+	// Object stores need a bucket, while HTTP adapters and filesystems can
+	// identify an artifact by its key alone. Preserve the historical SQL
+	// column names and use an empty bucket for these destinations.
+	if (artifact.StorageBackend == "s3" || artifact.StorageBackend == "gcs") && strings.TrimSpace(artifact.Bucket) == "" {
+		return errors.New("artifact bucket is required for object storage")
 	}
 
 	_, err := r.db.ExecContext(ctx, `

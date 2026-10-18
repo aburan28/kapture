@@ -64,6 +64,9 @@ Redaction happens in the capture pipeline before records or evidence reach the
 destination. Authentication of that destination is separate from credentials
 inside captured traffic. Payloads and evidence belong in object/file/queue
 storage; SQL history receives artifact metadata and locations only.
+History accepts destinations without a bucket. The existing SQL `s3_bucket`
+column holds an empty string for these artifacts; no history schema migration
+is needed.
 
 ## HTTP v1 wire protocol
 
