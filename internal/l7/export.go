@@ -41,6 +41,11 @@ func NewExporter(cfg ExportConfig) (*Exporter, error) {
 	if cfg.Writer == nil || cfg.Artifacts == nil || cfg.CaptureID == "" {
 		return nil, fmt.Errorf("capture ID, request writer and artifact writer are required")
 	}
+	if v, ok := cfg.Artifacts.(interface{ ValidateArtifacts() error }); ok {
+		if err := v.ValidateArtifacts(); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.RedactHeaders == nil {
 		cfg.RedactHeaders = append([]string(nil), agent.DefaultRedactHeaders...)
 	}

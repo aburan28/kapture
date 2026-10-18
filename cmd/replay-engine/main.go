@@ -49,6 +49,7 @@ type config struct {
 	region      string
 	prefix      string
 	mountPath   string
+	backendURL  string
 
 	// Capture selection
 	captureID  string
@@ -111,7 +112,8 @@ func parseFlags() config {
 	var cfg config
 
 	// Storage flags.
-	flag.StringVar(&cfg.storageType, "storage-type", "", "Storage backend: s3, gcs, efs, ebs")
+	flag.StringVar(&cfg.storageType, "storage-type", "", "Storage backend: s3, gcs, efs, ebs, http")
+	flag.StringVar(&cfg.backendURL, "backend-url", os.Getenv("BACKEND_URL"), "Public HTTP backend endpoint")
 	flag.StringVar(&cfg.bucket, "bucket", "", "S3/GCS bucket name")
 	flag.StringVar(&cfg.region, "region", "", "AWS region (S3 only)")
 	flag.StringVar(&cfg.prefix, "prefix", "", "Storage prefix/path")
@@ -523,6 +525,10 @@ func runDirectReplay(ctx context.Context, cfg config, reader replay.Reader, logg
 
 func buildReaderConfig(cfg config) map[string]any {
 	m := map[string]any{}
+	if cfg.backendURL != "" {
+		m["endpoint"] = cfg.backendURL
+		m["token"] = os.Getenv("BACKEND_TOKEN")
+	}
 	if cfg.bucket != "" {
 		m["bucket"] = cfg.bucket
 	}

@@ -35,6 +35,14 @@ func TestMain(m *testing.M) {
 // and incompatible plugins across re-execs.
 type fakeEngine struct{}
 
+func TestFeedItemCarriesLegacyQueryWithoutMutatingSource(t *testing.T) {
+	r := &storage.CapturedRequest{ID: "query", Path: "/query", Metadata: map[string]string{"query": "v=%2F&v=2"}}
+	item := feedItemFromCaptured(r, time.Time{})
+	if item.Path != "/query?v=%2F&v=2" || r.Path != "/query" {
+		t.Fatal("subprocess feed lost raw query or mutated source")
+	}
+}
+
 func (f *fakeEngine) Describe(context.Context) (*replayenginev1.DescribeResponse, error) {
 	version := os.Getenv("FAKE_ENGINE_VERSION")
 	if version == "" {

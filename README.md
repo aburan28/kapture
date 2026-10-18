@@ -4,7 +4,7 @@ A Kubernetes traffic capture controller that uses **Gateway API RequestMirror fi
 
 ## Overview
 
-Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes by injecting `RequestMirror` filters that duplicate requests to capture agent pods. Captured data is written to pluggable storage backends (S3, GCS, EFS, EBS) in compressed JSONL format.
+Kapture captures HTTP and gRPC traffic through Gateway API mirroring or an opt-in eCapture collector, sends it to independently selectable destinations, and feeds replay engines through a shared streaming contract. Native S3, GCS, EFS and EBS storage retain compressed JSONL; external HTTP backends can use their own layout.
 
 **Documentation:**
 [Quickstart](docs/quickstart.md) ·
@@ -12,6 +12,7 @@ Kapture intercepts live HTTP and gRPC traffic flowing through Gateway API routes
 [Troubleshooting](docs/troubleshooting.md) ·
 [Multi-Cell Load Testing](docs/multi-cell-load-testing.md) ·
 [Replay Engine ABI](docs/replay-engine-abi.md) ·
+[Destination Backend API](docs/backend-api.md) ·
 [TLS & Rotation](docs/tls-rotation.md) ·
 [eBPF L7 Capture Proposal](docs/design/ebpf-l7-capture.md) ·
 [eBPF Backend Guide](docs/ebpf-capture.md) ·

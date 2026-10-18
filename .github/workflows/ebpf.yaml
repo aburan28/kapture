@@ -6,6 +6,8 @@ on:
       - 'internal/ecapture/**'
       - 'internal/ebpf/**'
       - 'internal/storage/**'
+      - 'pkg/**'
+      - 'patches/**'
       - 'cmd/capture-agent/**'
       - 'Dockerfile.ebpf'
       - '.github/workflows/ebpf.yaml'
@@ -16,11 +18,16 @@ on:
       - 'internal/ecapture/**'
       - 'internal/ebpf/**'
       - 'internal/storage/**'
+      - 'pkg/**'
+      - 'patches/**'
       - 'cmd/capture-agent/**'
       - 'Dockerfile.ebpf'
       - '.github/workflows/ebpf.yaml'
 permissions:
   contents: read
+concurrency:
+  group: native-ebpf-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   native-openssl:
     runs-on: ubuntu-24.04

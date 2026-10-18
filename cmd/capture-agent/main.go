@@ -38,7 +38,7 @@ func main() {
 		httpPort         = flag.Int("http-port", 8080, "HTTP sink listen port")
 		grpcPort         = flag.Int("grpc-port", 9090, "gRPC sink listen port")
 		healthPort       = flag.Int("health-port", 8081, "Health/metrics listen port")
-		storageType      = flag.String("storage-type", envOr("STORAGE_TYPE", "efs"), "Storage backend type (s3, gcs, efs, ebs, plugin)")
+		storageType      = flag.String("storage-type", envOr("STORAGE_TYPE", "efs"), "Storage backend type (s3, gcs, efs, ebs, plugin, http)")
 		storageConfig    = flag.String("storage-config", envOr("STORAGE_CONFIG", "{}"), "Storage backend config as JSON")
 		captureID        = flag.String("capture-id", envOr("CAPTURE_ID", ""), "Capture ID for file naming")
 		captureNamespace = flag.String("capture-namespace", envOr("CAPTURE_NAMESPACE", ""), "TrafficCapture namespace for history records")
@@ -249,6 +249,14 @@ func main() {
 
 func parseStorageConfig(storageType, rawJSON string) (any, error) {
 	switch strings.ToLower(strings.TrimSpace(storageType)) {
+	case "http":
+		var cfg storage.HTTPConfig
+		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("parse HTTP backend config: %w", err)
+		}
+		cfg.Endpoint = firstNonEmpty(cfg.Endpoint, os.Getenv("BACKEND_URL"))
+		cfg.Token = os.Getenv("BACKEND_TOKEN")
+		return cfg, nil
 	case "s3":
 		var cfg storage.S3Config
 		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {
@@ -306,6 +314,11 @@ func unmarshalOptionalConfig(rawJSON string, target any) error {
 
 func attachHistoryRecorder(config any, recorder storage.ArtifactRecorder, namespace, name string) any {
 	switch cfg := config.(type) {
+	case storage.HTTPConfig:
+		cfg.ArtifactRecorder = recorder
+		cfg.CaptureNamespace = namespace
+		cfg.CaptureName = name
+		return cfg
 	case storage.S3Config:
 		cfg.ArtifactRecorder = recorder
 		cfg.CaptureNamespace = namespace

@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -9,7 +10,7 @@ import (
 
 const KindCaptureStorage = "CaptureStorage"
 
-// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS;Plugin
+// +kubebuilder:validation:Enum=S3;GCS;EFS;EBS;Plugin;HTTP
 type CaptureStorageType string
 
 const (
@@ -18,6 +19,7 @@ const (
 	CaptureStorageTypeEFS    CaptureStorageType = "EFS"
 	CaptureStorageTypeEBS    CaptureStorageType = "EBS"
 	CaptureStorageTypePlugin CaptureStorageType = "Plugin"
+	CaptureStorageTypeHTTP   CaptureStorageType = "HTTP"
 )
 
 // +kubebuilder:validation:Enum=Ready;Error
@@ -88,6 +90,18 @@ type PluginConfig struct {
 	Config *runtime.RawExtension `json:"config,omitempty"`
 }
 
+// HTTPBackendConfig connects to an independently deployed destination speaking
+// kapture.backend.v1. Capture and replay negotiate its capabilities at runtime.
+type HTTPBackendConfig struct {
+	// +kubebuilder:validation:MinLength=8
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://.*`
+	Endpoint string `json:"endpoint"`
+	// TokenSecretRef supplies a bearer token from a Secret in this namespace.
+	// +optional
+	TokenSecretRef *corev1.SecretKeySelector `json:"tokenSecretRef,omitempty"`
+}
+
 // CaptureStorageSpec defines the desired state of CaptureStorage.
 //
 // +kubebuilder:validation:XValidation:rule="self.type != 'S3' || has(self.s3)",message="s3 configuration is required when type is S3"
@@ -95,6 +109,7 @@ type PluginConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.type != 'EFS' || has(self.efs)",message="efs configuration is required when type is EFS"
 // +kubebuilder:validation:XValidation:rule="self.type != 'EBS' || has(self.ebs)",message="ebs configuration is required when type is EBS"
 // +kubebuilder:validation:XValidation:rule="self.type != 'Plugin' || has(self.plugin)",message="plugin configuration is required when type is Plugin"
+// +kubebuilder:validation:XValidation:rule="self.type != 'HTTP' || has(self.http)",message="http configuration is required when type is HTTP"
 type CaptureStorageSpec struct {
 	Type CaptureStorageType `json:"type"`
 	// +optional
@@ -107,6 +122,8 @@ type CaptureStorageSpec struct {
 	EBS *EBSConfig `json:"ebs,omitempty"`
 	// +optional
 	Plugin *PluginConfig `json:"plugin,omitempty"`
+	// +optional
+	HTTP *HTTPBackendConfig `json:"http,omitempty"`
 	// +optional
 	Retention *RetentionPolicy `json:"retention,omitempty"`
 }

@@ -296,7 +296,16 @@ drain:
 	if err := cfg.Export.Writer.Flush(finalCtx); err != nil && runErr == nil {
 		runErr = err
 	}
-	manifest := map[string]any{"formatVersion": 1, "captureID": cfg.CaptureID, "producerRevision": ecapture.Revision, "exchanges": exporter.Exchanges, "replayRequests": exporter.Requests, "observations": s.events.Load(), "lossIntervals": s.loss.Load(), "decodeErrors": engine.DecodeErrors, "unattributedEvents": s.unattributed.Load(), "retentionEvictions": exporter.Evictions, "captureIntegrity": "unverified", "stoppedAt": time.Now().UTC(), "failed": runErr != nil}
+	sourceMode, producerRevision, producerPatch := "managed", "unknown", "unknown"
+	switch {
+	case cfg.InputFile != "":
+		sourceMode = "recorded"
+	case cfg.SourceURL != "":
+		sourceMode = "remote"
+	case cfg.Binary == "/ecapture":
+		producerRevision, producerPatch = ecapture.Revision, ecapture.Patch
+	}
+	manifest := map[string]any{"formatVersion": 1, "captureID": cfg.CaptureID, "producerRevision": producerRevision, "producerPatch": producerPatch, "adapterTargetRevision": ecapture.Revision, "sourceMode": sourceMode, "exchanges": exporter.Exchanges, "replayRequests": exporter.Requests, "observations": s.events.Load(), "lossIntervals": s.loss.Load(), "decodeErrors": engine.DecodeErrors, "unattributedEvents": s.unattributed.Load(), "retentionEvictions": exporter.Evictions, "captureIntegrity": "unverified", "stoppedAt": time.Now().UTC(), "failed": runErr != nil}
 	data, _ := json.Marshal(manifest)
 	if _, err := cfg.Export.Artifacts.PutArtifact(finalCtx, cfg.CaptureID, "sessions/"+uuid.NewString()+".json", data, "application/json"); err != nil && runErr == nil {
 		runErr = err

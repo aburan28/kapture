@@ -3,6 +3,8 @@
 Kapture can collect plaintext TLS observations from a pinned eCapture process,
 reconstruct HTTP/1.1 and HTTP/2/gRPC exchanges, and write L7 evidence plus replay
 datasets to S3, GCS, EFS, or EBS. Gateway RequestMirror capture remains the default.
+External destinations can implement the [public backend API](backend-api.md);
+the HTTP adapter carries both request projections and opaque L7 evidence.
 
 ## Install and capture a pod
 
@@ -70,6 +72,14 @@ host with usable kernel BTF at `/sys/kernel/btf/vmlinux`, working BPF/perf/uprob
 facilities, and an OpenSSL workload supported by that revision. The collector
 runs as root with `hostPID` and a privileged security context, and mounts host
 `/sys` read-only. Cluster admission must permit that explicitly enabled workload.
+
+The image also applies `patches/ecapture-openssl-ex.patch` (`kapture-openssl-ex-v1`).
+It adds optional `SSL_read_ex` / `SSL_write_ex` probes, reads their processed-byte
+out parameter after successful returns, suppresses nested wrapper duplicates, and
+omits zero-length operations. Libraries without those symbols keep legacy probes.
+Image labels and managed-binary session manifests record both the upstream pin
+and patch ID. Recorded input and remote producers are labeled by source mode;
+their producer revision and patch remain unknown without an attestation.
 
 Process discovery matches the target Pod UID in host cgroups and libraries in
 `/proc/PID/maps`; command-name matching is not used. At most eight OpenSSL

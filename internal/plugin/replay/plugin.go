@@ -33,6 +33,7 @@ import (
 
 	"github.com/kapture-io/kapture/internal/plugin/validation"
 	"github.com/kapture-io/kapture/internal/storage"
+	"github.com/kapture-io/kapture/pkg/capture"
 )
 
 // Reader loads captured requests from a data source. Implementations read from
@@ -65,28 +66,7 @@ type ManifestLoader interface {
 }
 
 // ReadOptions configures what data a Reader should load.
-type ReadOptions struct {
-	// CaptureID identifies the capture session to replay (e.g., "namespace/name").
-	CaptureID string
-
-	// StartTime filters requests to those captured at or after this time.
-	// Zero value means no lower bound.
-	StartTime time.Time
-
-	// EndTime filters requests to those captured before this time.
-	// Zero value means no upper bound.
-	EndTime time.Time
-
-	// PathPrefix filters requests to those whose path starts with this prefix.
-	PathPrefix string
-
-	// Methods filters to specific HTTP methods (GET, POST, etc.).
-	// Empty means all methods.
-	Methods []string
-
-	// Limit caps the total number of requests to read. Zero means unlimited.
-	Limit int64
-}
+type ReadOptions = capture.ReadOptions
 
 // Sender delivers a captured request to a target service and reports the result.
 // Implementations handle the actual HTTP/gRPC call to the target.
