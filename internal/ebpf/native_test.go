@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,18 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 	if os.Getenv("KAPTURE_NATIVE_EBPF") != "1" {
 		t.Skip("set KAPTURE_NATIVE_EBPF=1 on a root Linux BPF host")
 	}
+	fixture := os.Getenv("ECAPTURE_FIXTURE_BINARY")
+	if fixture == "" {
+		t.Fatal("ECAPTURE_FIXTURE_BINARY must select the compiled test/fixtures/openssl-server.c fixture")
+	}
+	if _, err := os.Stat(fixture); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("ssl_bio", func(t *testing.T) { testNativeOpenSSLCapture(t, "") })
+	t.Run("worker_thread_ex", func(t *testing.T) { testNativeOpenSSLCapture(t, fixture) })
+}
+
+func testNativeOpenSSLCapture(t *testing.T, fixture string) {
 	if os.Geteuid() != 0 {
 		t.Fatal("native capture requires root")
 	}
@@ -53,6 +66,9 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 	address := listener.Addr().String()
 	listener.Close()
 	server := exec.Command("openssl", "s_server", "-quiet", "-accept", address, "-cert", cert, "-key", key, "-HTTP")
+	if fixture != "" {
+		server = exec.Command(fixture, "-accept", address, "-cert", cert, "-key", key)
+	}
 	server.Dir = dir
 	server.Stdout = io.Discard
 	server.Stderr = io.Discard
@@ -73,8 +89,20 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 	healthAddress := health.Addr().String()
 	health.Close()
 	done := make(chan error, 1)
+	var logMu sync.Mutex
+	var producerLogs []string
+	processLog := func(line string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		if len(line) > 8192 {
+			line = line[len(line)-8192:]
+		}
+		if len(producerLogs) < 64 {
+			producerLogs = append(producerLogs, line)
+		}
+	}
 	go func() {
-		done <- Run(ctx, Config{CaptureID: "native/capture", Binary: binary, PID: server.Process.Pid, HealthAddress: healthAddress, Export: l7.ExportConfig{CaptureID: "native/capture", Writer: writer, Artifacts: factory, IncludeHeaders: true, IncludeBody: true, PCAP: true}})
+		done <- Run(ctx, Config{CaptureID: "native/capture", Binary: binary, PID: server.Process.Pid, HealthAddress: healthAddress, ProcessLog: processLog, Export: l7.ExportConfig{CaptureID: "native/capture", Writer: writer, Artifacts: factory, IncludeHeaders: true, IncludeBody: true, PCAP: true}})
 	}()
 	defer func() {
 		if !t.Failed() {
@@ -85,7 +113,12 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
-		// Only counters and quality are printed; captured headers/bodies never
+		logMu.Lock()
+		for _, line := range producerLogs {
+			t.Logf("fixture producer: %s", line)
+		}
+		logMu.Unlock()
+		// Only operational diagnostics, counters and quality are printed; headers/bodies never
 		// enter CI diagnostics, even when a producer or decoder fails.
 		files, _ := filepath.Glob(filepath.Join(output, "evidence/native/capture", "*", "*.json"))
 		for _, file := range files {
@@ -133,15 +166,26 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 			t.Fatalf("fixture response differs: %q %v", body, err)
 		}
 	}
-	var captured *storage.CapturedRequest
-	lastDiagnostic := time.Now()
-	for captured == nil {
+	loadCaptured := func(readCtx context.Context) []*storage.CapturedRequest {
 		reader, _ := replay.NewFilesystemReader(replay.FilesystemReaderConfig{MountPath: output})
-		if err := reader.Open(ctx, replay.ReadOptions{CaptureID: "native/capture"}); err == nil {
-			captured, _ = reader.Next(ctx)
+		defer reader.Close()
+		if reader.Open(readCtx, replay.ReadOptions{CaptureID: "native/capture"}) != nil {
+			return nil
 		}
-		reader.Close()
-		if captured != nil {
+		var records []*storage.CapturedRequest
+		for {
+			request, err := reader.Next(readCtx)
+			if err != nil {
+				return records
+			}
+			records = append(records, request)
+		}
+	}
+	var captured []*storage.CapturedRequest
+	lastDiagnostic := time.Now()
+	for len(captured) < 3 {
+		captured = loadCaptured(ctx)
+		if len(captured) >= 3 {
 			break
 		}
 		select {
@@ -161,11 +205,13 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 			}
 		}
 	}
-	if captured.Path != "/fixture" || http.Header(captured.Headers).Get("Authorization") != "[REDACTED]" {
-		t.Fatalf("native capture is incorrect: %+v", captured)
-	}
-	if captured.Metadata["captureIntegrity"] != "unverified" {
-		t.Fatal("native producer overclaimed integrity")
+	for _, request := range captured {
+		if request.Path != "/fixture" || http.Header(request.Headers).Get("Authorization") != "[REDACTED]" {
+			t.Fatal("native request or redaction is incorrect")
+		}
+		if request.Metadata["captureIntegrity"] != "unverified" {
+			t.Fatal("native producer overclaimed integrity")
+		}
 	}
 	files, _ := filepath.Glob(filepath.Join(output, "evidence/native/capture", "*", "*.json"))
 	if len(files) == 0 {
@@ -189,5 +235,15 @@ func TestNativeOpenSSLCapture(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("collector did not stop")
 	}
-	t.Logf("actual OpenSSL BPF capture produced %d evidence files and replay request %s", len(files), captured.ID)
+	finalCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	captured = loadCaptured(finalCtx)
+	ids := map[string]bool{}
+	for _, request := range captured {
+		ids[request.ID] = true
+	}
+	if len(captured) != 3 || len(ids) != 3 {
+		t.Fatalf("expected three independent exchanges without wrapper duplication: records=%d identities=%d", len(captured), len(ids))
+	}
+	t.Logf("actual OpenSSL BPF capture produced %d evidence files and %d independent replay requests", len(files), len(captured))
 }

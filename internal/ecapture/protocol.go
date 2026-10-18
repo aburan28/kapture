@@ -16,18 +16,18 @@ import (
 )
 
 const Revision = "afcc9345ff8f09f96811a158cf768d284b4c7e1b"
-const Patch = "kapture-openssl-ex-v1"
+const Patch = "kapture-openssl-ex-v2"
 const MaxMessageBytes = 1 << 20
 
 // Event mirrors only fields needed from upstream protobuf/proto/v1/ecaptureq.proto.
 // Unknown fields are skipped with protobuf wire semantics for forward compatibility.
 type Event struct {
-	Timestamp                                                   int64
-	UUID, SourceIP, DestinationIP, ProcessName, Direction       string
-	SourcePort, DestinationPort, Length, OriginalLength, Format uint64
-	PID                                                         int64
-	Sequence                                                    uint64
-	Payload                                                     []byte
+	Timestamp                                                       int64
+	UUID, SourceIP, DestinationIP, ProcessName, Direction, StreamID string
+	SourcePort, DestinationPort, Length, OriginalLength, Format     uint64
+	PID                                                             int64
+	Sequence                                                        uint64
+	Payload                                                         []byte
 }
 type Entry struct {
 	Event      *Event
@@ -113,6 +113,8 @@ func Decode(data []byte) (Entry, error) {
 			e.Direction = string(b)
 		case 15:
 			e.OriginalLength = v
+		case 16:
+			e.StreamID = string(b)
 		case 17:
 			e.Sequence = v
 		}
@@ -166,9 +168,15 @@ func (e *Event) Observation(epoch string, now time.Time) (l7.Observation, error)
 	if e.Direction != "read" && e.Direction != "write" {
 		return l7.Observation{}, fmt.Errorf("unknown direction")
 	}
+	if len(e.StreamID) > 128 {
+		return l7.Observation{}, fmt.Errorf("invalid stream identity")
+	}
 	endpoints := []string{net.JoinHostPort(e.SourceIP, strconv.FormatUint(e.SourcePort, 10)), net.JoinHostPort(e.DestinationIP, strconv.FormatUint(e.DestinationPort, 10))}
 	sort.Strings(endpoints)
 	o := l7.Observation{Epoch: epoch, Flow: fmt.Sprintf("%d/%s/%s", e.PID, endpoints[0], endpoints[1]), Lane: e.Direction, Sequence: e.Sequence, ID: e.UUID, Timestamp: now, Data: e.Payload, OriginalLength: int(e.OriginalLength)}
+	if e.StreamID != "" {
+		o.Flow = fmt.Sprintf("%d/%s/%s/%s", e.PID, e.StreamID, endpoints[0], endpoints[1])
+	}
 	o.TimestampBasis = "collector-receive"
 	// The pinned OpenSSL ABI clamps data_len before publication. Equality at
 	// its cap cannot distinguish a complete call from a lost tail.

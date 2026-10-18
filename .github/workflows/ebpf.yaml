@@ -5,6 +5,7 @@ on:
       - 'internal/l7/**'
       - 'internal/ecapture/**'
       - 'internal/ebpf/**'
+      - 'test/fixtures/**'
       - 'internal/storage/**'
       - 'pkg/**'
       - 'patches/**'
@@ -17,6 +18,7 @@ on:
       - 'internal/l7/**'
       - 'internal/ecapture/**'
       - 'internal/ebpf/**'
+      - 'test/fixtures/**'
       - 'internal/storage/**'
       - 'pkg/**'
       - 'patches/**'
@@ -40,11 +42,15 @@ jobs:
       - name: Build pinned eCapture and Kapture image
         run: docker build -f Dockerfile.ebpf -t kapture/ebpf-agent:test .
       - name: Build native test executable
-        run: CGO_ENABLED=0 go test -c -o /tmp/kapture-native.test ./internal/ebpf
+        run: |
+          CGO_ENABLED=0 go test -c -o /tmp/kapture-native.test ./internal/ebpf
+          cc -O2 -pthread test/fixtures/openssl-server.c -lssl -lcrypto -o /tmp/kapture-openssl-fixture
       - name: Capture real OpenSSL traffic through BPF
         run: |
           docker run --rm --privileged --pid=host \
             -e KAPTURE_NATIVE_EBPF=1 \
+            -e ECAPTURE_FIXTURE_BINARY=/openssl-fixture \
             --mount type=bind,src=/tmp/kapture-native.test,dst=/native.test,readonly \
+            --mount type=bind,src=/tmp/kapture-openssl-fixture,dst=/openssl-fixture,readonly \
             --entrypoint /native.test kapture/ebpf-agent:test \
-            -test.run '^TestNativeOpenSSLCapture$' -test.v -test.timeout=120s
+            -test.run '^TestNativeOpenSSLCapture$' -test.v -test.timeout=180s

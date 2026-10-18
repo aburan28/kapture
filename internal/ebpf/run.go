@@ -32,8 +32,11 @@ type Config struct {
 	SourceURL     string
 	InputFile     string
 	HealthAddress string
-	Engine        l7.Config
-	Export        l7.ExportConfig
+	// ProcessLog optionally observes producer operational messages. It is not
+	// used for payload decoding; callers own diagnostic retention and policy.
+	ProcessLog func(string)
+	Engine     l7.Config
+	Export     l7.ExportConfig
 }
 type record struct {
 	epoch       string
@@ -113,6 +116,9 @@ func Run(ctx context.Context, cfg Config) error {
 	defer func() { cancel(); wg.Wait() }()
 	handle := func(epoch string) func(ecapture.Entry) error {
 		return func(entry ecapture.Entry) error {
+			if cfg.ProcessLog != nil && entry.ProcessLog != "" {
+				cfg.ProcessLog(entry.ProcessLog)
+			}
 			if ecapture.IsLossLog(entry.ProcessLog) {
 				return send(record{epoch: epoch, reason: "producer_reported_loss"})
 			}
@@ -187,7 +193,7 @@ func Run(ctx context.Context, cfg Config) error {
 				cancel  context.CancelFunc
 			}{p, stop}
 			start(epoch, func(_ context.Context) error {
-				return ecapture.Collect(sourceCtx, cfg.Binary, cfg.ProcRoot, cfg.PodUID, p, cfg.MapPages, handle(epoch), func() { _ = send(record{epoch: epoch, ready: true}) })
+				return ecapture.Collect(sourceCtx, cfg.Binary, cfg.ProcRoot, cfg.PodUID, p, cfg.MapPages, handle(epoch), func() { _ = send(record{epoch: epoch, ready: true}) }, cfg.ProcessLog)
 			})
 		}
 		return nil

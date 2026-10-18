@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -171,7 +172,7 @@ func Receive(ctx context.Context, url string, handle func(Entry) error, ready fu
 	}
 }
 
-func Collect(ctx context.Context, binary, procRoot, podUID string, p Process, mapPages int, handle func(Entry) error, ready func()) error {
+func Collect(ctx context.Context, binary, procRoot, podUID string, p Process, mapPages int, handle func(Entry) error, ready func(), diagnostics func(string)) error {
 	if mapPages < 8 || mapPages > 8192 {
 		return fmt.Errorf("map pages must be between 8 and 8192")
 	}
@@ -181,8 +182,11 @@ func Collect(ctx context.Context, binary, procRoot, podUID string, p Process, ma
 	}
 	address := listener.Addr().String()
 	_ = listener.Close()
-	args := []string{"tls", "-m", "text", "--pid", strconv.Itoa(p.PID), "--libssl", p.Library, "--mapsize", strconv.Itoa(mapPages), "--ecaptureq", "ws://" + address + "/", "--eventaddr", "/dev/null"}
+	args := []string{"tls", "-m", "text", "--pid", strconv.Itoa(p.PID), "--libssl", p.Library, "--mapsize", strconv.Itoa(mapPages), "--ecaptureq", "ws://" + address + "/", "--eventaddr", "stdout"}
 	cmd := exec.Command(binary, args...)
+	// Typed events arrive through eCaptureQ. Discard the independent text
+	// stream; its standard-stream sink does not attempt fsync on /dev/null.
+	cmd.Stdout = io.Discard
 	// A pipe drained into a bounded buffer avoids persisting captured logs.
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -198,10 +202,20 @@ func Collect(ctx context.Context, binary, procRoot, podUID string, p Process, ma
 		scanner := bufio.NewScanner(stderr)
 		scanner.Buffer(make([]byte, 4096), 65536)
 		for scanner.Scan() {
-			if diagnostic.Len() < 4096 {
-				diagnostic.WriteString(scanner.Text())
-				diagnostic.WriteByte('\n')
+			line := scanner.Text() + "\n"
+			if len(line) > 8192 {
+				line = line[len(line)-8192:]
 			}
+			if diagnostic.Len()+len(line) > 8192 {
+				tail := diagnostic.String()
+				keep := 8192 - len(line)
+				if len(tail) > keep {
+					tail = tail[len(tail)-keep:]
+				}
+				diagnostic.Reset()
+				diagnostic.WriteString(tail)
+			}
+			diagnostic.WriteString(line)
 		}
 	}()
 	wait := make(chan error, 1)
@@ -246,6 +260,9 @@ func Collect(ctx context.Context, binary, procRoot, podUID string, p Process, ma
 	<-drain
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if diagnostics != nil && diagnostic.Len() > 0 {
+		diagnostics("eCapture failure diagnostics: " + diagnostic.String())
 	}
 	if cause == nil {
 		cause = fmt.Errorf("collector exited")

@@ -183,8 +183,9 @@ nor a unique advantage over another tool extended with the same retention policy
 
 ## Benchmark scopes
 
-Kapture's current image applies the documented `kapture-openssl-ex-v1` patch to
-the pinned eCapture source to observe modern OpenSSL `_ex` calls. An acquisition
+Kapture's current image applies the documented `kapture-openssl-ex-v2` patch to
+the pinned eCapture source for `_ex` APIs, OpenSSL 3.0 SSL BIO helpers, and
+kernel socket-lifetime/tuple snapshots. An acquisition
 comparison must label that build separately from the unmodified upstream control.
 The parser-only measurements above do not include this probe change.
 

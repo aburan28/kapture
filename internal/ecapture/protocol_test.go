@@ -37,6 +37,7 @@ func eventWire(payload []byte) []byte {
 	event = wireInt(event, 12, 1)
 	event = wireBytes(event, 14, []byte("write"))
 	event = wireInt(event, 15, uint64(len(payload)))
+	event = wireBytes(event, 16, []byte("socket-lifetime"))
 	event = wireInt(event, 17, 1)
 	return wireBytes(wireInt(nil, 1, 2), 2, event)
 }
@@ -49,7 +50,7 @@ func TestTypedProtocolPreservesBinaryAndRejectsMalformedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Event == nil || !bytes.Equal(entry.Event.Payload, payload) {
+	if entry.Event == nil || !bytes.Equal(entry.Event.Payload, payload) || entry.Event.StreamID != "socket-lifetime" {
 		t.Fatal("binary payload changed")
 	}
 	o, err := entry.Event.Observation("epoch", time.Now())
@@ -81,6 +82,26 @@ func TestProtocolHonorsLastOneofPayload(t *testing.T) {
 	data = wireBytes(eventWire([]byte("payload")), 4, []byte("log"))
 	if _, err := Decode(data); err == nil {
 		t.Fatal("a run log was accepted as an event payload")
+	}
+}
+
+func TestSocketIdentitySeparatesReusedTuples(t *testing.T) {
+	e := &Event{PID: 42, SourceIP: "127.0.0.1", DestinationIP: "127.0.0.2", SourcePort: 443, DestinationPort: 30000, Format: 1, Direction: "read", StreamID: "socket-lifetime-one"}
+	first, err := e.Observation("producer", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.StreamID = "socket-lifetime-two"
+	second, err := e.Observation("producer", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Flow == second.Flow {
+		t.Fatal("different socket lifetimes merged by their reused TCP tuple")
+	}
+	e.StreamID = strings.Repeat("x", 129)
+	if _, err := e.Observation("producer", time.Now()); err == nil {
+		t.Fatal("unbounded stream identity accepted")
 	}
 }
 

@@ -1,5 +1,103 @@
+diff --git a/internal/probe/base/handlers/publisher_handler.go b/internal/probe/base/handlers/publisher_handler.go
+index 8d11371..2487abb 100644
+--- a/internal/probe/base/handlers/publisher_handler.go
++++ b/internal/probe/base/handlers/publisher_handler.go
+@@ -117,6 +117,9 @@ func (h *PublisherHandler) envelope(event domain.Event, sequence uint64) domain.
+ 	if value, ok := event.(interface{ GetDataLen() uint32 }); ok {
+ 		envelope.OriginalLength = value.GetDataLen()
+ 	}
++	if value, ok := event.(interface{ GetStreamID() string }); ok {
++		envelope.StreamID = value.GetStreamID()
++	}
+ 	if packet, ok := event.(PacketEvent); ok {
+ 		envelope.Payload = append([]byte(nil), packet.GetPacketData()...)
+ 		envelope.OriginalLength = packet.GetPacketLen()
+diff --git a/internal/probe/openssl/event.go b/internal/probe/openssl/event.go
+index b8aebea..f7cc369 100644
+--- a/internal/probe/openssl/event.go
++++ b/internal/probe/openssl/event.go
+@@ -16,8 +16,12 @@ package openssl
+ 
+ import (
+ 	"bytes"
++	"crypto/sha256"
+ 	"encoding/binary"
+ 	"fmt"
++	"net"
++	"net/netip"
++	"strconv"
+ 	"time"
+ 
+ 	"golang.org/x/sys/unix"
+@@ -114,6 +118,8 @@ type Event struct {
+ 	destinationIP   string
+ 	sourcePort      uint16
+ 	destinationPort uint16
++	connectionID    uint64
++	inlineNetwork   bool
+ }
+ 
+ // DecodeFromBytes deserializes the event from raw eBPF data.
+@@ -150,6 +156,42 @@ func (e *Event) DecodeFromBytes(data []byte) error {
+ 	if err := binary.Read(buf, binary.LittleEndian, &e.BioType); err != nil {
+ 		return errors.NewEventDecodeError("openssl.BioType", err)
+ 	}
++	// v2 appends an entry-time network snapshot to the unchanged legacy prefix.
++	// Old samples may have alignment padding; incomplete new footers fail.
++	if buf.Len() > 8 {
++		if buf.Len() < 48 {
++			return errors.NewEventDecodeError("openssl.Network", fmt.Errorf("short network footer"))
++		}
++		var network struct {
++			ID                                           uint64
++			Source, Destination                          [16]byte
++			Family, SourcePort, DestinationPort, Version uint16
++		}
++		if err := binary.Read(buf, binary.LittleEndian, &network); err != nil {
++			return errors.NewEventDecodeError("openssl.Network", err)
++		}
++		if network.Version != 2 {
++			return errors.NewEventDecodeError("openssl.Network", fmt.Errorf("unsupported network footer"))
++		}
++		e.inlineNetwork = true
++		if network.ID != 0 && network.SourcePort != 0 && network.DestinationPort != 0 {
++			var source, destination netip.Addr
++			switch network.Family {
++			case unix.AF_INET:
++				source = netip.AddrFrom4([4]byte(network.Source[:4]))
++				destination = netip.AddrFrom4([4]byte(network.Destination[:4]))
++			case unix.AF_INET6:
++				source = netip.AddrFrom16(network.Source)
++				destination = netip.AddrFrom16(network.Destination)
++			}
++			if source.IsValid() && destination.IsValid() && !source.IsUnspecified() && !destination.IsUnspecified() {
++				e.connectionID = network.ID
++				e.sourceIP, e.destinationIP = source.String(), destination.String()
++				e.sourcePort, e.destinationPort = network.SourcePort, network.DestinationPort
++				e.Tuple = net.JoinHostPort(e.sourceIP, strconv.Itoa(int(e.sourcePort))) + "-" + net.JoinHostPort(e.destinationIP, strconv.Itoa(int(e.destinationPort)))
++			}
++		}
++	}
+ 
+ 	return nil
+ }
+@@ -283,6 +325,14 @@ func (e *Event) GetDstIP() string   { return e.destinationIP }
+ func (e *Event) GetSrcPort() uint16 { return e.sourcePort }
+ func (e *Event) GetDstPort() uint16 { return e.destinationPort }
+ 
++func (e *Event) GetStreamID() string {
++	if e.connectionID == 0 {
++		return ""
++	}
++	digest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d/%s", e.Pid, e.connectionID, e.Tuple)))
++	return fmt.Sprintf("%x", digest[:16])
++}
++
+ // GetComm returns the process name as a string.
+ func (e *Event) GetComm() string {
+ 	return commToString(e.Comm[:])
 diff --git a/internal/probe/openssl/openssl_probe.go b/internal/probe/openssl/openssl_probe.go
-index d798623..bf32c5e 100644
+index d798623..7a629ba 100644
 --- a/internal/probe/openssl/openssl_probe.go
 +++ b/internal/probe/openssl/openssl_probe.go
 @@ -17,6 +17,7 @@ package openssl
@@ -10,7 +108,24 @@ index d798623..bf32c5e 100644
  	"fmt"
  	"io"
  	"math"
-@@ -354,6 +355,22 @@ func (p *Probe) setupManagerText() error {
+@@ -128,6 +129,16 @@ func (p *Probe) Start(ctx context.Context) error {
+ 	if err != nil {
+ 		return errors.NewEBPFLoadError(bpfFileName, err)
+ 	}
++	if handlers.IsModeText(p.config.CaptureMode) {
++		spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(byteBuf))
++		if err != nil {
++			return errors.NewEBPFLoadError("OpenSSL text ABI", err)
++		}
++		buffer := spec.Maps["data_buffer_heap"]
++		if buffer == nil || buffer.ValueSize != MaxDataSize+104 || spec.Maps["ssl_connection_ids"] == nil {
++			return errors.NewEBPFLoadError("OpenSSL text ABI", fmt.Errorf("BPF assets and network snapshot decoder do not match; clean rebuild required"))
++		}
++	}
+ 
+ 	// Setup eBPF manager
+ 	if err := p.setupManager(); err != nil {
+@@ -354,6 +365,39 @@ func (p *Probe) setupManagerText() error {
  		},
  	}
  
@@ -29,37 +144,185 @@ index d798623..bf32c5e 100644
 +		}
 +		_ = binary.Close()
 +	}
++	if strings.HasPrefix(strings.ToLower(p.config.SslVersion), "openssl 3.0.") {
++		read, write, err := openssl30InternalOffsets(opensslPath)
++		if err != nil {
++			return errors.NewConfigurationError("cannot resolve OpenSSL 3.0 BIO plaintext helpers", err)
++		}
++		for _, target := range []struct {
++			name, api string
++			offset    uint64
++		}{
++			{"read", "SSL_read_ex", read}, {"write", "SSL_write_ex", write},
++		} {
++			name := "SSL_" + target.name + "_internal"
++			probes = append(probes,
++				&manager.Probe{Section: "uprobe/" + name, UID: name, EbpfFuncName: "probe_entry_" + target.api, AttachToFuncName: name, BinaryPath: opensslPath, UAddress: target.offset},
++				&manager.Probe{Section: "uretprobe/" + name, UID: name, EbpfFuncName: "probe_ret_" + target.api, AttachToFuncName: name, BinaryPath: opensslPath, UAddress: target.offset})
++		}
++	}
 +
  	p.bpfManager = &manager.Manager{
  		Probes: probes,
  		Maps:   maps,
+@@ -763,7 +807,10 @@ func (d *tlsEventDecoder) Decode(_ *ebpf.Map, data []byte) (domain.Event, error)
+ 	if err := event.Validate(); err != nil {
+ 		return nil, err
+ 	}
+-	if d.probe != nil {
++	if d.probe != nil && event.inlineNetwork && event.connectionID == 0 {
++		d.probe.Logger().Warn().Uint32("pid", event.Pid).Uint32("fd", event.Fd).Uint32("bio_type", event.BioType).Msg("TLS network snapshot unavailable")
++	}
++	if d.probe != nil && !event.inlineNetwork {
+ 		if conn, ok := d.probe.connections.lookup(event.Pid, event.Fd); ok {
+ 			event.Tuple = conn.tuple
+ 			event.Sock = conn.sock
 diff --git a/kern/openssl.h b/kern/openssl.h
-index 9a8fb26..3476881 100644
+index 9a8fb26..ce3ab01 100644
 --- a/kern/openssl.h
 +++ b/kern/openssl.h
-@@ -64,6 +64,9 @@ struct active_ssl_buf {
+@@ -15,6 +15,10 @@
+ #include "ecapture.h"
+ #include "openssl_untag.h"
+ #include "tc.h"
++#ifdef NOCORE
++#include <linux/fdtable.h>
++#include <linux/fs.h>
++#endif
+ 
+ /***********************************************************
+  * Internal structs and definitions
+@@ -25,6 +29,16 @@ enum ssl_data_event_type { kSSLRead, kSSLWrite };
+ #define INVALID_FD 0
+ #define DEFAULT_BIO_TYPE 0
+ 
++struct ssl_network_context {
++    u64 connection_id;
++    u8 saddr[16];
++    u8 daddr[16];
++    u16 family;
++    u16 sport;
++    u16 dport;
++    u16 version;
++};
++
+ struct ssl_data_event_t {
+     enum ssl_data_event_type type;
+     u64 timestamp_ns;
+@@ -36,6 +50,7 @@ struct ssl_data_event_t {
+     u32 fd;
+     s32 version;
+     u32 bio_type;
++    struct ssl_network_context network;
+ };
+ 
+ struct connect_event_t {
+@@ -64,6 +79,10 @@ struct active_ssl_buf {
      u32 fd;
      u32 bio_type;
      const char* buf;
 +    const u64* actual_len;
 +    u32 depth;
 +    u32 extended;
++    struct ssl_network_context network;
  };
  
  struct tcp_fd_info {
-@@ -162,9 +165,8 @@ static __always_inline struct ssl_data_event_t* create_ssl_data_event(
+@@ -125,6 +144,14 @@ struct {
+     __uint(max_entries, 10240);
+ } ssl_st_fd SEC(".maps");
  
- static int process_SSL_data(struct pt_regs* ctx, u64 id,
++// Kernel socket lifetimes, independent of fd reuse and perf reader ordering.
++struct {
++    __uint(type, BPF_MAP_TYPE_LRU_HASH);
++    __type(key, u64);
++    __type(value, u64);
++    __uint(max_entries, 8192);
++} ssl_connection_ids SEC(".maps");
++
+ 
+ struct {
+     __uint(type, BPF_MAP_TYPE_HASH);
+@@ -138,6 +165,54 @@ struct {
+  * General helper functions
+  ***********************************************************/
+ 
++static __always_inline void ssl_snapshot_network(u32 fd, struct ssl_network_context *out) {
++    __builtin_memset(out, 0, sizeof(*out));
++    out->version = 2;
++    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
++    struct files_struct *files = NULL;
++    struct fdtable *table = NULL;
++    struct file **entries = NULL;
++    struct file *file = NULL;
++    struct inode *inode = NULL;
++    struct socket *socket = NULL;
++    struct sock *sk = NULL;
++    u32 max_fds = 0;
++    u16 mode = 0;
++    if (bpf_probe_read_kernel(&files, sizeof(files), &task->files) || !files ||
++        bpf_probe_read_kernel(&table, sizeof(table), &files->fdt) || !table ||
++        bpf_probe_read_kernel(&max_fds, sizeof(max_fds), &table->max_fds) || fd >= max_fds ||
++        bpf_probe_read_kernel(&entries, sizeof(entries), &table->fd) || !entries ||
++        bpf_probe_read_kernel(&file, sizeof(file), entries + fd) || !file ||
++        bpf_probe_read_kernel(&inode, sizeof(inode), &file->f_inode) || !inode ||
++        bpf_probe_read_kernel(&mode, sizeof(mode), &inode->i_mode) || (mode & 0170000) != 0140000 ||
++        bpf_probe_read_kernel(&socket, sizeof(socket), &file->private_data) || !socket ||
++        bpf_probe_read_kernel(&sk, sizeof(sk), &socket->sk) || !sk) {
++        return;
++    }
++    if (bpf_probe_read_kernel(&out->family, sizeof(out->family), &sk->__sk_common.skc_family)) {
++        return;
++    }
++    if (out->family == AF_INET) {
++        if (bpf_probe_read_kernel(out->saddr, 4, &sk->__sk_common.skc_rcv_saddr) ||
++            bpf_probe_read_kernel(out->daddr, 4, &sk->__sk_common.skc_daddr)) { return; }
++    } else if (out->family == AF_INET6) {
++        if (bpf_probe_read_kernel(out->saddr, 16, &sk->__sk_common.skc_v6_rcv_saddr) ||
++            bpf_probe_read_kernel(out->daddr, 16, &sk->__sk_common.skc_v6_daddr)) { return; }
++    } else { return; }
++    if (bpf_probe_read_kernel(&out->sport, sizeof(out->sport), &sk->__sk_common.skc_num) ||
++        bpf_probe_read_kernel(&out->dport, sizeof(out->dport), &sk->__sk_common.skc_dport)) { return; }
++    out->dport = bpf_ntohs(out->dport);
++    if (out->sport == 0 || out->dport == 0) { return; }
++    u64 key = (u64)sk;
++    u64 *id = bpf_map_lookup_elem(&ssl_connection_ids, &key);
++    if (!id) {
++        u64 fresh = bpf_ktime_get_ns();
++        bpf_map_update_elem(&ssl_connection_ids, &key, &fresh, BPF_NOEXIST);
++        id = bpf_map_lookup_elem(&ssl_connection_ids, &key);
++    }
++    if (id) { out->connection_id = *id; }
++}
++
+ static __always_inline struct ssl_data_event_t* create_ssl_data_event(
+     u64 current_pid_tgid) {
+     u32 zero = 0;
+@@ -160,11 +235,11 @@ static __always_inline struct ssl_data_event_t* create_ssl_data_event(
+  * BPF syscall processing functions
+  ***********************************************************/
+ 
+-static int process_SSL_data(struct pt_regs* ctx, u64 id,
++static __always_inline int process_SSL_data(struct pt_regs* ctx, u64 id,
                              enum ssl_data_event_type type, const char* buf,
 -                            u32 fd, s32 version, u32 bio_type) {
 -    int len = (int)PT_REGS_RC(ctx);
 -    if (len < 0) {
-+                            u32 fd, s32 version, u32 bio_type, int len) {
++                            u32 fd, s32 version, u32 bio_type, int len,
++                            const struct ssl_network_context *network) {
 +    if (len <= 0) {
          return 0;
      }
  
-@@ -268,11 +270,18 @@ static int process_SSL_bio(void *ssl, int bio_offset, u32 *fd, u32 *bio_type) {
+@@ -177,6 +252,7 @@ static int process_SSL_data(struct pt_regs* ctx, u64 id,
+     event->fd = fd;
+     event->bio_type = bio_type;
+     event->version = version;
++    __builtin_memcpy(&event->network, network, sizeof(event->network));
+     // This is a max function, but it is written in such a way to keep older BPF
+     // verifiers happy.
+     event->data_len =
+@@ -268,11 +344,18 @@ static int process_SSL_bio(void *ssl, int bio_offset, u32 *fd, u32 *bio_type) {
      return 0;
  }
  
@@ -79,20 +342,21 @@ index 9a8fb26..3476881 100644
      void *ssl = openssl_untag_user_pointer((const void *)PT_REGS_PARM1(ctx));
      u64 *ssl_ver_ptr;
      u64 ssl_version = 0;
-@@ -300,7 +309,11 @@ static __always_inline int probe_entry_SSL(struct pt_regs* ctx, void *map, int b
+@@ -300,7 +383,12 @@ static __always_inline int probe_entry_SSL(struct pt_regs* ctx, void *map, int b
      active_ssl_buf_t.version = ssl_version;
      active_ssl_buf_t.buf = buf;
      active_ssl_buf_t.bio_type = bio_type;
 -    u64 current_pid_tgid = bpf_get_current_pid_tgid();
 +    active_ssl_buf_t.depth = 1;
 +    active_ssl_buf_t.extended = extended;
++    ssl_snapshot_network(fd, &active_ssl_buf_t.network);
 +    if (extended) {
 +        active_ssl_buf_t.actual_len = openssl_untag_user_pointer((const void *)PT_REGS_PARM4(ctx));
 +    }
      bpf_map_update_elem(map, &current_pid_tgid, &active_ssl_buf_t, BPF_ANY);
      return 0;
  }
-@@ -313,12 +326,25 @@ static __always_inline int probe_ret_SSL(struct pt_regs* ctx, void *map, enum ss
+@@ -313,12 +401,25 @@ static __always_inline int probe_ret_SSL(struct pt_regs* ctx, void *map, enum ss
  
      struct active_ssl_buf* active_ssl_buf_t = bpf_map_lookup_elem(map, &current_pid_tgid);
      if (active_ssl_buf_t != NULL) {
@@ -115,11 +379,11 @@ index 9a8fb26..3476881 100644
 +        }
          bpf_probe_read(&buf, sizeof(const char*), &active_ssl_buf_t->buf);
 -        process_SSL_data(ctx, current_pid_tgid, type, buf, fd, version, bio_type);
-+        process_SSL_data(ctx, current_pid_tgid, type, buf, fd, version, bio_type, len);
++        process_SSL_data(ctx, current_pid_tgid, type, buf, fd, version, bio_type, len, &active_ssl_buf_t->network);
      }
      bpf_map_delete_elem(map, &current_pid_tgid);
      return 0;
-@@ -332,7 +358,7 @@ static __always_inline int probe_ret_SSL(struct pt_regs* ctx, void *map, enum ss
+@@ -332,7 +433,7 @@ static __always_inline int probe_ret_SSL(struct pt_regs* ctx, void *map, enum ss
  // int SSL_write(SSL *ssl, const void *buf, int num);
  SEC("uprobe/SSL_write")
  int probe_entry_SSL_write(struct pt_regs* ctx) {
@@ -128,7 +392,7 @@ index 9a8fb26..3476881 100644
  }
  
  SEC("uretprobe/SSL_write")
-@@ -344,7 +370,7 @@ int probe_ret_SSL_write(struct pt_regs* ctx) {
+@@ -344,7 +445,7 @@ int probe_ret_SSL_write(struct pt_regs* ctx) {
  // int SSL_read(SSL *s, void *buf, int num)
  SEC("uprobe/SSL_read")
  int probe_entry_SSL_read(struct pt_regs* ctx) {
@@ -137,7 +401,7 @@ index 9a8fb26..3476881 100644
  }
  
  SEC("uretprobe/SSL_read")
-@@ -352,6 +378,29 @@ int probe_ret_SSL_read(struct pt_regs* ctx) {
+@@ -352,6 +453,29 @@ int probe_ret_SSL_read(struct pt_regs* ctx) {
      return probe_ret_SSL(ctx, &active_ssl_read_args_map, kSSLRead);
  }
  
@@ -167,3 +431,299 @@ index 9a8fb26..3476881 100644
  
  static __always_inline struct tcp_fd_info *find_fd_info(struct pt_regs *regs) {
      u64 pid_tgid = bpf_get_current_pid_tgid();
+@@ -512,6 +636,8 @@ int retprobe_accept4(struct pt_regs* ctx) {
+ SEC("kprobe/tcp_v4_destroy_sock")
+ int probe_tcp_v4_destroy_sock(struct pt_regs* ctx) {
+     struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
++    u64 socket_key = (u64)sk;
++    bpf_map_delete_elem(&ssl_connection_ids, &socket_key);
+     struct connect_event_t conn;
+ 
+     __builtin_memset(&conn, 0, sizeof(conn));
+@@ -530,6 +656,7 @@ int probe_tcp_v4_destroy_sock(struct pt_regs* ctx) {
+ // int SSL_set_wfd(SSL *s, int fd)
+ SEC("uprobe/SSL_set_fd")
+ int probe_SSL_set_fd(struct pt_regs* ctx) {
++    if (!passes_filter(ctx)) { return 0; }
+ 
+     u64 ssl_addr = (u64)openssl_untag_user_pointer((const void *)PT_REGS_PARM1(ctx));
+     u64 fd = (u64)PT_REGS_PARM2(ctx);
+diff --git a/internal/probe/openssl/internal_offsets.go b/internal/probe/openssl/internal_offsets.go
+new file mode 100644
+index 0000000..9318503
+--- /dev/null
++++ b/internal/probe/openssl/internal_offsets.go
+@@ -0,0 +1,151 @@
++// SPDX-License-Identifier: Apache-2.0
++package openssl
++
++import (
++	"debug/elf"
++	"fmt"
++	"io"
++	"strings"
++
++	"golang.org/x/arch/x86/x86asm"
++)
++
++// OpenSSL 3.0 SSL BIO callbacks bypass the exported SSL APIs and call the
++// same private helpers as SSL_read[_ex]/SSL_write[_ex]. Resolve those helpers
++// from both public wrappers, without fixed offsets or byte-pattern searches.
++// Unsupported layouts fail before attachment rather than guessing an ABI.
++func openssl30InternalOffsets(path string) (uint64, uint64, error) {
++	f, err := elf.Open(path)
++	if err != nil {
++		return 0, 0, err
++	}
++	defer f.Close()
++	if f.Machine != elf.EM_X86_64 || f.Class != elf.ELFCLASS64 {
++		return 0, 0, fmt.Errorf("OpenSSL 3.0 BIO helpers require a supported x86-64 ELF layout")
++	}
++	symbols, err := f.DynamicSymbols()
++	if err != nil {
++		return 0, 0, err
++	}
++	find := func(name string) (elf.Symbol, error) {
++		for _, s := range symbols {
++			if s.Name == name && s.Section != elf.SHN_UNDEF && elf.ST_TYPE(s.Info) == elf.STT_FUNC && s.Size > 0 && s.Size <= 512 {
++				return s, nil
++			}
++		}
++		return elf.Symbol{}, fmt.Errorf("missing or unsupported %s wrapper", name)
++	}
++	private := func(address uint64) bool {
++		if _, ok := executableOffset(f, address); !ok {
++			return false
++		}
++		for _, s := range symbols {
++			if s.Section != elf.SHN_UNDEF && s.Value == address {
++				return false
++			}
++		}
++		for _, section := range f.Sections {
++			if strings.Contains(section.Name, "plt") && address >= section.Addr && address-section.Addr < section.Size {
++				return false
++			}
++		}
++		return true
++	}
++	helper := func(api string) (uint64, error) {
++		var calls [2][]uint64
++		for i, name := range []string{api, api + "_ex"} {
++			symbol, err := find(name)
++			if err != nil {
++				return 0, err
++			}
++			code := make([]byte, symbol.Size)
++			var reader io.ReaderAt
++			var relative uint64
++			for _, p := range f.Progs {
++				if p.Type == elf.PT_LOAD && p.Flags&elf.PF_X != 0 && symbol.Value >= p.Vaddr && symbol.Value-p.Vaddr < p.Filesz && symbol.Size <= p.Filesz-(symbol.Value-p.Vaddr) {
++					reader, relative = p, symbol.Value-p.Vaddr
++					break
++				}
++			}
++			if reader == nil {
++				return 0, fmt.Errorf("%s wrapper outside executable segment", name)
++			}
++			if _, err := reader.ReadAt(code, int64(relative)); err != nil {
++				return 0, err
++			}
++			calls[i], err = directCalls(code, symbol.Value)
++			if err != nil {
++				return 0, err
++			}
++		}
++		var matches []uint64
++		for _, a := range calls[0] {
++			if !private(a) {
++				continue
++			}
++			for _, b := range calls[1] {
++				if a == b {
++					unique := true
++					for _, old := range matches {
++						if old == a {
++							unique = false
++						}
++					}
++					if unique {
++						matches = append(matches, a)
++					}
++				}
++			}
++		}
++		if len(matches) != 1 {
++			return 0, fmt.Errorf("%s wrappers do not uniquely identify a private helper", api)
++		}
++		offset, ok := executableOffset(f, matches[0])
++		if !ok {
++			return 0, fmt.Errorf("helper outside executable file data")
++		}
++		return offset, nil
++	}
++	read, err := helper("SSL_read")
++	if err != nil {
++		return 0, 0, err
++	}
++	write, err := helper("SSL_write")
++	if err != nil {
++		return 0, 0, err
++	}
++	if read == write {
++		return 0, 0, fmt.Errorf("read and write helpers unexpectedly coincide")
++	}
++	return read, write, nil
++}
++
++func executableOffset(f *elf.File, address uint64) (uint64, bool) {
++	for _, p := range f.Progs {
++		if p.Type == elf.PT_LOAD && p.Flags&elf.PF_X != 0 && address >= p.Vaddr && address-p.Vaddr < p.Filesz {
++			return p.Off + (address - p.Vaddr), true
++		}
++	}
++	return 0, false
++}
++
++func directCalls(code []byte, address uint64) ([]uint64, error) {
++	var calls []uint64
++	for offset := 0; offset < len(code); {
++		instruction, err := x86asm.Decode(code[offset:], 64)
++		if err != nil || instruction.Len == 0 || instruction.Op == 0 {
++			return nil, fmt.Errorf("invalid wrapper instruction")
++		}
++		if instruction.Op == x86asm.CALL {
++			if relative, ok := instruction.Args[0].(x86asm.Rel); ok {
++				pc := address + uint64(offset+instruction.Len)
++				if relative < 0 && uint64(-int64(relative)) > pc {
++					return nil, fmt.Errorf("relative call underflow")
++				}
++				calls = append(calls, uint64(int64(pc)+int64(relative)))
++			}
++		}
++		offset += instruction.Len
++	}
++	return calls, nil
++}
+diff --git a/internal/probe/openssl/internal_offsets_test.go b/internal/probe/openssl/internal_offsets_test.go
+new file mode 100644
+index 0000000..45b810e
+--- /dev/null
++++ b/internal/probe/openssl/internal_offsets_test.go
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: Apache-2.0
++package openssl
++
++import (
++	"debug/elf"
++	"os"
++	"reflect"
++	"testing"
++)
++
++func TestKaptureDirectCallInstructionBoundaries(t *testing.T) {
++	for _, test := range []struct {
++		name    string
++		code    []byte
++		address uint64
++		want    []uint64
++		bad     bool
++	}{
++		{"relative forward", []byte{0xe8, 11, 0, 0, 0, 0xc3}, 0x1000, []uint64{0x1010}, false},
++		{"relative backward", []byte{0xe8, 0xfb, 0xff, 0xff, 0xff, 0xc3}, 0x1000, []uint64{0x1000}, false},
++		{"CALL byte inside MOV immediate", []byte{0xb8, 0xe8, 0, 0, 0, 0xc3}, 0x1000, nil, false},
++		{"indirect call cannot identify helper", []byte{0xff, 0xd0, 0xc3}, 0x1000, nil, false},
++		{"truncated call", []byte{0xe8, 0}, 0x1000, nil, true},
++		{"underflow", []byte{0xe8, 0xf0, 0xff, 0xff, 0xff}, 0, nil, true},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			got, err := directCalls(test.code, test.address)
++			if (err != nil) != test.bad || !reflect.DeepEqual(got, test.want) {
++				t.Fatalf("calls=%v error=%v", got, err)
++			}
++		})
++	}
++}
++
++func TestKaptureExecutableFileOffsets(t *testing.T) {
++	f := &elf.File{Progs: []*elf.Prog{{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_X, Vaddr: 0x2000, Off: 0x1000, Filesz: 128}}, {ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Vaddr: 0x3000, Off: 0x2000, Filesz: 128}}}}
++	if got, ok := executableOffset(f, 0x2042); !ok || got != 0x1042 {
++		t.Fatalf("wrong file mapping: %x %t", got, ok)
++	}
++	for _, address := range []uint64{0x1fff, 0x2080, 0x3000} {
++		if _, ok := executableOffset(f, address); ok {
++			t.Fatalf("non-executable or out-of-file address accepted: %x", address)
++		}
++	}
++}
++
++func TestKaptureOpenSSL30LibraryHelpers(t *testing.T) {
++	path := os.Getenv("ECAPTURE_TEST_SSL_LIBRARY")
++	if path == "" {
++		t.Skip("set ECAPTURE_TEST_SSL_LIBRARY to select a real OpenSSL 3.0 ELF")
++	}
++	read, write, err := openssl30InternalOffsets(path)
++	if err != nil || read == 0 || write == 0 || read == write {
++		t.Fatalf("cannot identify independent read/write helpers: read=%x write=%x err=%v", read, write, err)
++	}
++	t.Logf("OpenSSL 3.0 helper file offsets: read=%x write=%x", read, write)
++}
++
++func TestKaptureRejectsInvalidHelperELF(t *testing.T) {
++	file, err := os.CreateTemp(t.TempDir(), "not-elf")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err = file.WriteString("invalid ELF"); err != nil {
++		t.Fatal(err)
++	}
++	file.Close()
++	if _, _, err := openssl30InternalOffsets(file.Name()); err == nil {
++		t.Fatal("invalid ELF accepted")
++	}
++}
+diff --git a/internal/probe/openssl/network_context_test.go b/internal/probe/openssl/network_context_test.go
+new file mode 100644
+index 0000000..3041c44
+--- /dev/null
++++ b/internal/probe/openssl/network_context_test.go
+@@ -0,0 +1,39 @@
++// SPDX-License-Identifier: Apache-2.0
++package openssl
++
++import (
++	"bytes"
++	"encoding/binary"
++	"testing"
++)
++
++func TestKaptureInlineSocketContext(t *testing.T) {
++	prefix := benchmarkTLSDataSample(t)
++	var footer bytes.Buffer
++	var source, destination [16]byte
++	copy(source[:], []byte{127, 0, 0, 1})
++	copy(destination[:], []byte{127, 0, 0, 2})
++	for _, field := range []any{uint64(123), source, destination, uint16(2), uint16(443), uint16(30000), uint16(2)} {
++		if err := binary.Write(&footer, binary.LittleEndian, field); err != nil {
++			t.Fatal(err)
++		}
++	}
++	sample := append(append([]byte(nil), prefix...), footer.Bytes()...)
++	var event Event
++	if err := event.DecodeFromBytes(append(sample, make([]byte, 8)...)); err != nil {
++		t.Fatal(err)
++	}
++	if !event.inlineNetwork || event.GetSrcIP() != "127.0.0.1" || event.GetDstIP() != "127.0.0.2" || event.GetSrcPort() != 443 || event.GetDstPort() != 30000 || event.GetStreamID() == "" {
++		t.Fatalf("inline metadata lost: %+v", event)
++	}
++	id := event.GetStreamID()
++	event.connectionID++
++	if event.GetStreamID() == id {
++		t.Fatal("reused fd/tuple kept the old socket identity")
++	}
++	for _, bad := range [][]byte{sample[:len(prefix)+16], append(append([]byte(nil), sample[:len(sample)-2]...), 3, 0)} {
++		if err := new(Event).DecodeFromBytes(bad); err == nil {
++			t.Fatal("partial/unsupported network footer accepted")
++		}
++	}
++}

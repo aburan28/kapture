@@ -68,15 +68,27 @@ allows bounded final flushing. A node crash cannot guarantee that final flush.
 
 The provided image builds eCapture at
 `afcc9345ff8f09f96811a158cf768d284b4c7e1b` with CO-RE assets. It requires a Linux
-host with usable kernel BTF at `/sys/kernel/btf/vmlinux`, working BPF/perf/uprobe
+x86-64 host with usable kernel BTF at `/sys/kernel/btf/vmlinux`, working BPF/perf/uprobe
 facilities, and an OpenSSL workload supported by that revision. The collector
 runs as root with `hostPID` and a privileged security context, and mounts host
 `/sys` read-only. Cluster admission must permit that explicitly enabled workload.
 
-The image also applies `patches/ecapture-openssl-ex.patch` (`kapture-openssl-ex-v1`).
+The image also applies `patches/ecapture-openssl-ex.patch` (`kapture-openssl-ex-v2`).
 It adds optional `SSL_read_ex` / `SSL_write_ex` probes, reads their processed-byte
 out parameter after successful returns, suppresses nested wrapper duplicates, and
 omits zero-length operations. Libraries without those symbols keep legacy probes.
+OpenSSL 3.0 SSL BIO callbacks bypass the exported APIs. Their private read/write
+helpers are resolved from the unique common direct call targets of each legacy
+and `_ex` wrapper, with instruction decoding and executable-segment checks.
+Unsupported x86-64 wrapper layouts fail before attachment.
+
+Each operation snapshots its TCP tuple and socket-lifetime identity in the kernel
+at entry, alongside its buffer reference. An 8,192-entry LRU map tracks socket
+identities and removes them on socket destruction. This avoids joining TLS data
+with a separately scheduled userspace metadata stream and distinguishes reused
+file descriptors and TCP tuples. The private kernel record has a versioned
+network footer; the loader verifies its map layout against the Go decoder.
+Typed eCaptureQ events carry a hashed connection identity in `stream_id`.
 Image labels and managed-binary session manifests record both the upstream pin
 and patch ID. Recorded input and remote producers are labeled by source mode;
 their producer revision and patch remain unknown without an attestation.
@@ -186,7 +198,7 @@ sudo ./kapture-agent --backend EBPF \
 ```
 
 Use `--ecapture-url ws://127.0.0.1:28257/` to consume a producer already running
-`ecapture tls -m text --eventaddr /dev/null --ecaptureq ws://127.0.0.1:28257/`.
+`ecapture tls -m text --eventaddr stdout --ecaptureq ws://127.0.0.1:28257/ >/dev/null`.
 The connection is not silently rejoined midstream after failure.
 
 `--l7-input observations.jsonl` reconstructs recorded `l7.Observation` JSONL
@@ -211,8 +223,21 @@ make benchmark-flowscope # Go 1.26 and Rust 1.97.0; pinned Rust FlowScope
 ```
 
 `TestNativeOpenSSLCapture` is selected with `KAPTURE_NATIVE_EBPF=1`. It creates an
-OpenSSL TLS server and verifies actual probe observations, evidence redaction,
-replay output, and shutdown. Missing root/BTF/probes are failures once selected.
+OpenSSL `s_server` using SSL BIO helpers and a worker-thread server using public
+`_ex` APIs. Both must produce exactly three complete replay records, without
+nested-wrapper duplication, and pass evidence redaction and shutdown checks.
+Missing root/BTF/probes or the selected fixture are failures once selected.
+Compile the fixture (OpenSSL development headers required) and select it:
+
+```bash
+cc -O2 -pthread test/fixtures/openssl-server.c -lssl -lcrypto -o /tmp/kapture-openssl-fixture
+KAPTURE_NATIVE_EBPF=1 ECAPTURE_FIXTURE_BINARY=/tmp/kapture-openssl-fixture \
+  ECAPTURE_BINARY=/path/to/patched/ecapture \
+  go test ./internal/ebpf -run '^TestNativeOpenSSLCapture$' -v -timeout 180s
+```
+
+A Debian 6.1 x86-64 QEMU VM provides local functional
+verification when the outer host lacks BTF; emulated timing is not a benchmark.
 The `eBPF Native Capture` workflow builds the pinned image and runs this test
 with a host PID namespace on an isolated Linux runner.
 

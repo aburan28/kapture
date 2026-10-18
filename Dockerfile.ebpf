@@ -22,7 +22,9 @@ COPY patches/ecapture-openssl-ex.patch /tmp/ecapture-openssl-ex.patch
 RUN git apply --check /tmp/ecapture-openssl-ex.patch && git apply /tmp/ecapture-openssl-ex.patch
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca; fi; \
-    make clean && make core CMD_CLANG=clang-14 CMD_LLC=llc-14 CMD_STRIP=llvm-strip-14
+    make clean && make core CMD_CLANG=clang-14 CMD_LLC=llc-14 CMD_STRIP=llvm-strip-14 && \
+    ECAPTURE_TEST_SSL_LIBRARY=/usr/lib/x86_64-linux-gnu/libssl.so.3 \
+    go test ./internal/probe/openssl -run '^TestKapture' -v -race
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -31,5 +33,5 @@ COPY --from=agent-builder /out/kapture-agent /kapture-agent
 COPY --from=ecapture-builder /ecapture-src/bin/ecapture /ecapture
 COPY --from=ecapture-builder /ecapture-src/LICENSE /usr/share/doc/ecapture/LICENSE
 LABEL io.kapture.ecapture.revision="afcc9345ff8f09f96811a158cf768d284b4c7e1b"
-LABEL io.kapture.ecapture.patch="kapture-openssl-ex-v1"
+LABEL io.kapture.ecapture.patch="kapture-openssl-ex-v2"
 ENTRYPOINT ["/kapture-agent"]
