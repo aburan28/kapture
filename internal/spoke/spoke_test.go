@@ -648,8 +648,8 @@ func TestBuildGRPCMirrorFilter_Fields(t *testing.T) {
 	if f.RequestMirror.BackendRef.Namespace == nil || string(*f.RequestMirror.BackendRef.Namespace) != "ns2" {
 		t.Errorf("namespace = %v, want %q", f.RequestMirror.BackendRef.Namespace, "ns2")
 	}
-	if f.RequestMirror.BackendRef.Port == nil || *f.RequestMirror.BackendRef.Port != 8080 {
-		t.Errorf("port = %v, want 8080", f.RequestMirror.BackendRef.Port)
+	if f.RequestMirror.BackendRef.Port == nil || *f.RequestMirror.BackendRef.Port != 9090 {
+		t.Errorf("port = %v, want 9090", f.RequestMirror.BackendRef.Port)
 	}
 }
 

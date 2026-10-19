@@ -38,6 +38,9 @@ func TestBuildGRPCMirrorFilter(t *testing.T) {
 	if string(filter.RequestMirror.BackendRef.Name) != "grpc-capture-agent" {
 		t.Errorf("expected backend ref name grpc-capture-agent, got %s", filter.RequestMirror.BackendRef.Name)
 	}
+	if filter.RequestMirror.BackendRef.Port == nil || *filter.RequestMirror.BackendRef.Port != 9090 {
+		t.Errorf("expected port 9090")
+	}
 }
 
 func TestHasHTTPMirrorFilter(t *testing.T) {
