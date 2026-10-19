@@ -1,3 +1,5 @@
+Read [AGENTS.md](AGENTS.md) and complete its literature-first review before doing any work.
+
 # CLAUDE.md - Kapture Project Guide
 
 ## Project Overview
