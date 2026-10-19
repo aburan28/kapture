@@ -33,5 +33,5 @@ COPY --from=agent-builder /out/kapture-agent /kapture-agent
 COPY --from=ecapture-builder /ecapture-src/bin/ecapture /ecapture
 COPY --from=ecapture-builder /ecapture-src/LICENSE /usr/share/doc/ecapture/LICENSE
 LABEL io.kapture.ecapture.revision="afcc9345ff8f09f96811a158cf768d284b4c7e1b"
-LABEL io.kapture.ecapture.patch="kapture-openssl-ex-v2"
+LABEL io.kapture.ecapture.patch="kapture-openssl-ex-v3"
 ENTRYPOINT ["/kapture-agent"]

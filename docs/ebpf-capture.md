@@ -73,14 +73,14 @@ facilities, and an OpenSSL workload supported by that revision. The collector
 runs as root with `hostPID` and a privileged security context, and mounts host
 `/sys` read-only. Cluster admission must permit that explicitly enabled workload.
 
-The image also applies `patches/ecapture-openssl-ex.patch` (`kapture-openssl-ex-v2`).
+The image also applies `patches/ecapture-openssl-ex.patch` (`kapture-openssl-ex-v3`).
 It adds optional `SSL_read_ex` / `SSL_write_ex` probes, reads their processed-byte
 out parameter after successful returns, suppresses nested wrapper duplicates, and
 omits zero-length operations. Libraries without those symbols keep legacy probes.
 OpenSSL 3.0 SSL BIO callbacks bypass the exported APIs. Their private read/write
 helpers are resolved from the unique common direct call targets of each legacy
 and `_ex` wrapper, with instruction decoding and executable-segment checks.
-Unsupported x86-64 wrapper layouts fail before attachment.
+Unsupported x86-64 wrapper layouts fail before attachment. It also fixes the upstream PID/FD connection cache when a reused socket moves to another worker's file descriptor; this previously caused a nil-map panic.
 
 Each operation snapshots its TCP tuple and socket-lifetime identity in the kernel
 at entry, alongside its buffer reference. An 8,192-entry LRU map tracks socket

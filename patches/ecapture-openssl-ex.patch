@@ -12,6 +12,31 @@ index 8d11371..2487abb 100644
  	if packet, ok := event.(PacketEvent); ok {
  		envelope.Payload = append([]byte(nil), packet.GetPacketData()...)
  		envelope.OriginalLength = packet.GetPacketLen()
+diff --git a/internal/probe/openssl/connection_cache.go b/internal/probe/openssl/connection_cache.go
+index b84e3a9..4d25607 100644
+--- a/internal/probe/openssl/connection_cache.go
++++ b/internal/probe/openssl/connection_cache.go
+@@ -73,15 +73,17 @@ func (c *connectionCache) observe(event *ConnDataEvent) {
+ 		c.byPID = make(map[uint32]map[uint32]connectionInfo)
+ 		c.bySock = make(map[uint64]connectionKey)
+ 	}
+-	if c.byPID[event.Pid] == nil {
+-		c.byPID[event.Pid] = make(map[uint32]connectionInfo)
+-	}
+ 	if previous, ok := c.byPID[event.Pid][event.Fd]; ok {
+ 		delete(c.bySock, previous.sock)
+ 	}
+ 	if previousKey, ok := c.bySock[event.Sock]; ok {
+ 		c.removeLocked(previousKey, event.Sock)
+ 	}
++	// A socket can be observed again (including from a different worker).
++	// removeLocked may remove the final FD and its per-PID map above.
++	if c.byPID[event.Pid] == nil {
++		c.byPID[event.Pid] = make(map[uint32]connectionInfo)
++	}
+ 	c.nextGeneration++
+ 	c.byPID[event.Pid][event.Fd] = connectionInfo{
+ 		tuple:           event.Tuple,
 diff --git a/internal/probe/openssl/event.go b/internal/probe/openssl/event.go
 index b8aebea..f7cc369 100644
 --- a/internal/probe/openssl/event.go
@@ -725,5 +750,36 @@ index 0000000..3041c44
 +		if err := new(Event).DecodeFromBytes(bad); err == nil {
 +			t.Fatal("partial/unsupported network footer accepted")
 +		}
++	}
++}
+diff --git a/internal/probe/openssl/connection_cache_kapture_test.go b/internal/probe/openssl/connection_cache_kapture_test.go
+new file mode 100644
+index 0000000..5bbb8b3
+--- /dev/null
++++ b/internal/probe/openssl/connection_cache_kapture_test.go
+@@ -0,0 +1,25 @@
++package openssl
++
++import (
++	"testing"
++
++	"golang.org/x/sys/unix"
++)
++
++func TestKaptureRepeatedSocketObservation(t *testing.T) {
++	var cache connectionCache
++	event := ConnDataEvent{connDataEvent: connDataEvent{Pid: 123, Fd: 7, Sock: 42, Family: unix.AF_INET, Sport: 8443, Dport: 12345}}
++	for i := 0; i < 10; i++ {
++		event.Fd = uint32(7 + i)
++		cache.observe(&event)
++		info, ok := cache.lookup(event.Pid, event.Fd)
++		if !ok || info.sock != event.Sock || info.generation != uint64(i+1) {
++			t.Fatalf("observation %d not retained: %+v %v", i, info, ok)
++		}
++	}
++	// An old expiry must not remove the refreshed socket lifetime.
++	cache.expire(event.Sock, 1)
++	if _, ok := cache.lookup(event.Pid, event.Fd); !ok {
++		t.Fatal("stale expiry removed the refreshed connection")
 +	}
 +}

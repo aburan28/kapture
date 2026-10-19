@@ -16,7 +16,7 @@ import (
 )
 
 const Revision = "afcc9345ff8f09f96811a158cf768d284b4c7e1b"
-const Patch = "kapture-openssl-ex-v2"
+const Patch = "kapture-openssl-ex-v3"
 const MaxMessageBytes = 1 << 20
 
 // Event mirrors only fields needed from upstream protobuf/proto/v1/ecaptureq.proto.
