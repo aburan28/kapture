@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Exercise the actual Rust adapter with fragmented, interleaved exchanges."""
 import hashlib
+import base64
+import json
+import tempfile
+from pathlib import Path
 import struct
 import subprocess
 import sys
@@ -29,3 +33,27 @@ assert len(result.stdout) == 30, (len(result.stdout), "expected exactly three ex
 records = [struct.unpack("<QBB", result.stdout[n:n+10]) for n in range(0, 30, 10)]
 assert records == [(2, 1, 1), (1, 1, 1), (3, 0, 1)], records
 print("Rust adapter: interleaved IDs, split headers/body and negative body oracle passed")
+
+# Test the post-window evidence checker independently of the live collector.
+# A correct request projection must not hide a response paired with another ID.
+sys.dont_write_bytecode = True
+from run import verify_evidence
+
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    path = root / "evidence/benchmark/capture/epoch/one.json"
+    path.parent.mkdir(parents=True)
+    exchange = {
+        "request": {"method": "POST", "path": "/bench", "complete": True,
+                    "headers": {"X-Bench-Id": ["1"], "X-Bench-Phase": ["measure"], "Authorization": ["[REDACTED]"]},
+                    "body": base64.b64encode(body).decode()},
+        "response": {"complete": True, "status": 204,
+                     "headers": {"X-Bench-Id": ["1"], "X-Bench-SHA256": [digest]}},
+        "quality": {"framingComplete": True}}
+    path.write_text(json.dumps(exchange))
+    assert verify_evidence(root, size, 1)["complete"]
+    exchange["response"]["headers"]["X-Bench-Id"] = ["2"]
+    path.write_text(json.dumps(exchange))
+    checked = verify_evidence(root, size, 1)
+    assert checked["invalid"] == 1 and not checked["complete"], checked
+print("Evidence oracle: valid durable pairs accepted; mismatched response rejected")

@@ -32,12 +32,12 @@ remote sink traffic, a control plane, or production mTLS certificate management.
 
 ## Workload and accounting
 
-All configurations use the same OpenSSL application binary, TLS 1.3, HTTP/1.1
+All configurations use the same OpenSSL application binary, TLS 1.3 (AES-128-GCM on the application leg), HTTP/1.1
 POSTs, 16 persistent client workers, exact request IDs, and deterministic bodies.
 Profiles: 128-byte POST; 8-KiB POST; 8-KiB POST with 64 additional SHA256 body
 hashes. There is no application delay or dependency service. Every response
 returns its request ID and body digest; errors and missed arrival slots are
-reported. Each trial starts fresh processes and includes a one-second warmup.
+reported. The load result records the negotiated TLS cipher suites. Exported request/response IDs, hashes, bodies, framing and redaction are checked again from the actual evidence files after the measured interval. Each trial starts fresh processes and includes a one-second warmup.
 
 Fixed load offers 100 requests/sec for six seconds. A request's latency starts
 at its scheduled arrival, including queue/scheduler delay; missed arrivals are

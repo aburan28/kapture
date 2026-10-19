@@ -84,6 +84,7 @@ int main(int argc, char **argv) {
     context = SSL_CTX_new(TLS_server_method());
     if (!context || SSL_CTX_set_min_proto_version(context, TLS1_3_VERSION) != 1 ||
         SSL_CTX_set_max_proto_version(context, TLS1_3_VERSION) != 1 ||
+        SSL_CTX_set_ciphersuites(context, "TLS_AES_128_GCM_SHA256") != 1 ||
         SSL_CTX_use_certificate_file(context, argv[2], SSL_FILETYPE_PEM) != 1 ||
         SSL_CTX_use_PrivateKey_file(context, argv[3], SSL_FILETYPE_PEM) != 1) return 3;
     int listener = socket(AF_INET, SOCK_STREAM, 0), enabled = 1;

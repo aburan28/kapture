@@ -6,6 +6,7 @@ capture and proxy processes. QEMU timing is deliberately not used. Only Python's
 standard library is required; see README.md for tool and host prerequisites.
 """
 import argparse
+import base64
 import csv
 import hashlib
 import json
@@ -148,6 +149,45 @@ def envoy_config(cert, key, mirror):
             "clusters": [app] + ([cluster("capture", 18080)] if mirror else [])}}
 
 
+def verify_evidence(artifacts, size, expected):
+    """Outside the measured interval, verify durable request/response pairs."""
+    seen = set()
+    invalid, duplicates = 0, 0
+    digest = hashlib.sha256(b"x" * size).hexdigest()
+    for path in artifacts.glob("evidence/benchmark/capture/*/*.json"):
+        if path.parent.name == "sessions":
+            continue
+        exchange = json.loads(path.read_text())
+        request, response = exchange["request"], exchange["response"]
+        headers = {k.lower(): v[0] for k, v in request.get("headers", {}).items() if v}
+        returned = {k.lower(): v[0] for k, v in response.get("headers", {}).items() if v}
+        if headers.get("x-bench-phase") == "warmup":
+            continue
+        try:
+            ident = int(headers.get("x-bench-id", "0"))
+            valid = (ident > 0 and headers.get("x-bench-phase") == "measure"
+                     and request.get("method") == "POST" and request.get("path") == "/bench"
+                     and request.get("complete") and response.get("complete")
+                     and base64.b64decode(request.get("body", ""), validate=True) == b"x" * size
+                     and response.get("status") == 204
+                     and returned.get("x-bench-id") == str(ident)
+                     and returned.get("x-bench-sha256") == digest
+                     and headers.get("authorization") == "[REDACTED]"
+                     and exchange["quality"]["framingComplete"]
+                     and not exchange["quality"].get("reasons"))
+        except (ValueError, KeyError):
+            valid = False
+        if not valid:
+            invalid += 1
+        elif ident in seen:
+            duplicates += 1
+        else:
+            seen.add(ident)
+    total = sum(seen)
+    return {"exchanges": len(seen), "invalid": invalid, "duplicates": duplicates,
+            "id_sum": total, "complete": len(seen) == expected and total == expected * (expected + 1) // 2 and invalid == 0 and duplicates == 0}
+
+
 def trial(args, mode, profile, load_kind, repetition, ordinal, cert, key, cpus, cgroups):
     name, body, work = profile
     directory = args.output / f"{ordinal:03d}-{name}-{load_kind}-{mode}-r{repetition}"
@@ -234,6 +274,10 @@ def trial(args, mode, profile, load_kind, repetition, ordinal, cert, key, cpus, 
                 result["production_session"] = json.loads(sessions[-1].read_text())
                 session = result["production_session"]
                 result["capture_complete"] &= not session["failed"] and session["decodeErrors"] == 0 and session["lossIntervals"] == 0 and session["unattributedEvents"] == 0
+            if mode == "ebpf-export":
+                result["evidence_validation"] = verify_evidence(artifacts, body, expected)
+                result["capture_complete"] &= result["evidence_validation"]["complete"]
+                result["capture_yield"] = min(oracle["exchanges"], result["evidence_validation"]["exchanges"]) / expected if expected else 0
             result["artifact_bytes"] = sum(p.stat().st_size for p in artifacts.rglob("*") if p.is_file())
         result["application_ok"] = result["errors"] == 0 and result["missed"] == 0 and expected > 0
         return result

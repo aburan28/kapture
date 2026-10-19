@@ -85,6 +85,7 @@ func load(args []string) error {
 	digest := sha256.Sum256(body)
 	wantHash := hex.EncodeToString(digest[:])
 	var seq, failures, success, missed atomic.Uint64
+	var suites sync.Map
 	var mu sync.Mutex
 	var latency, service []int64
 	var firstError string
@@ -115,6 +116,7 @@ func load(args []string) error {
 			mu.Unlock()
 			return
 		}
+		suites.LoadOrStore(response.TLS.CipherSuite, true)
 		success.Add(1)
 		mu.Lock()
 		latency = append(latency, finished.Sub(scheduled).Nanoseconds())
@@ -171,7 +173,13 @@ func load(args []string) error {
 		i := int(float64(len(values)-1) * p)
 		return float64(values[i]) / 1e6
 	}
-	result := map[string]any{"success": success.Load(), "errors": failures.Load(), "missed": missed.Load(), "attempts": seq.Load(), "offering_seconds": duration.Seconds(), "elapsed_seconds": elapsed, "rps": float64(success.Load()) / elapsed, "p50_ms": quantile(latency, .5), "p95_ms": quantile(latency, .95), "p99_ms": quantile(latency, .99), "service_p95_ms": quantile(service, .95), "first_error": firstError}
+	var cipherNames []string
+	suites.Range(func(key, value any) bool {
+		cipherNames = append(cipherNames, tls.CipherSuiteName(key.(uint16)))
+		return true
+	})
+	sort.Strings(cipherNames)
+	result := map[string]any{"tls_cipher_suites": cipherNames, "success": success.Load(), "errors": failures.Load(), "missed": missed.Load(), "attempts": seq.Load(), "offering_seconds": duration.Seconds(), "elapsed_seconds": elapsed, "rps": float64(success.Load()) / elapsed, "p50_ms": quantile(latency, .5), "p95_ms": quantile(latency, .95), "p99_ms": quantile(latency, .99), "service_p95_ms": quantile(service, .95), "first_error": firstError}
 	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
