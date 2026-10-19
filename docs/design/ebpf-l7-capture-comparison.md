@@ -1,8 +1,11 @@
 # eCapture and FlowScope: L7 Capture Comparison and Measurement Protocol
 
 **Status:** Source comparison and analytical model completed. An initial
-eCaptureQ backend and user-space benchmarks now exist; live comparative capture
-measurements have not been run. See the [backend guide](../ebpf-capture.md).
+eCaptureQ backend and user-space benchmarks now exist. Native application-impact
+measurements for Envoy request mirroring were added on 2026-10-19; the native
+eBPF/Rust application comparison is queued. See the
+[application-overhead results](../benchmarks/2026-10-19-application-overhead/README.md)
+and [backend guide](../ebpf-capture.md).
 
 **Date:** 2026-10-17
 
@@ -88,6 +91,7 @@ an analytical scenario, not a capture benchmark.
 | Architecture and API comparison | Completed against the pinned sources above |
 | Logical retained-byte model | Calculated below with reproducible inputs |
 | eCapture application overhead and capture loss | Not measured here |
+| Envoy application and mirroring overhead | 54 native workspace trials completed; see results linked above |
 | FlowScope capture throughput | Not rerun here |
 | Rust flowscope parser throughput | HTTP/1 exchange reconstruction measured below; other protocols not benchmarked |
 | Loom live capture quality, CPU, memory, or throughput | Requires a BPF-capable test host; user-space fixture tests and benchmarks are separate |
@@ -139,6 +143,37 @@ The [harness](../../tools/benchmark-l7.sh) pins FlowScope and its dependency loc
 file. [Raw trials](../benchmarks/2026-10-17-http1.csv) are in execution order,
 with four rows per trial. `make benchmark-l7` additionally measures the Go
 HTTP/2 checkpoint path and allocations; it is not a cross-tool HTTP/2 benchmark.
+
+## Application overhead: native Envoy measurements and queued BPF comparison
+
+The [2026-10-19 results](../benchmarks/2026-10-19-application-overhead/README.md)
+measure application latency/throughput, application CPU, separate proxy/capture
+CPU and anonymous memory. They contain 54 native Linux trials: no capture,
+Envoy without mirroring, and Envoy with 100% request mirroring, across three
+workloads and two load patterns, with three repeats. All 1,608,258 measured
+application requests succeeded, and every measured mirrored request passed its
+unique-ID/body/redaction oracle. Raw rows, exact parameters and a CPU plot are
+included. The workload uses HTTP/1.1 over OpenSSL TLS 1.3, fixed 100 requests/sec
+and a separate 16-worker saturation phase.
+
+At saturation, incremental mirroring reduced median paired throughput by 25.5%
+for 128-byte requests and 45.0% for 8-KiB requests. The CPU-work variant showed no
+clear throughput reduction. Fixed-load extra CPU across the app, proxy and
+capture process was 385, 534 and 687 microseconds/request respectively. These
+are short, shared-host observations with meaningful ranges; see the full report
+before using the medians. They describe one Envoy data plane and local request
+storage, not a measured full service-mesh installation or network object store.
+
+There are no live eBPF-versus-Rust application-overhead numbers in that dataset.
+The workspace kernel lacks BTF. A separate BTF-capable Linux VM validated actual
+BPF capture for SSL BIO, worker-thread `_ex` calls, and persistent Go/Rust/export
+adapters, but software-emulated timing is deliberately excluded. The
+[native workflow](../../.github/workflows/overhead.yaml) runs 126 trials on a
+BPF-capable host: acquisition only, Go reconstruction, Rust reconstruction with
+the same TLS feed and IPC, complete local export, and the three controls above.
+It records capture yield and computes paired baselines automatically. The Rust
+parser receives plaintext from the same eCapture source; a standalone encrypted
+packet feed would not provide equivalent HTTP visibility.
 
 ## Reproducible retained-byte model
 

@@ -8,6 +8,7 @@ standard library is required; see README.md for tool and host prerequisites.
 import argparse
 import base64
 import csv
+import ctypes
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODES = ["none", "ebpf-acquire", "ebpf-go", "ebpf-rust", "ebpf-export", "envoy", "envoy-mirror"]
 PROFILES = [("small", 128, 0), ("upload", 8192, 0), ("cpu", 8192, 64)]
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+LIBC = ctypes.CDLL(None)
 
 
 def get_json(url):
@@ -54,18 +56,25 @@ def listening(port):
 
 
 def proc_group(session):
-    usage, rss = 0, 0
+    usage, rss, anon = 0, 0, 0
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
         try:
             fields = (entry / "stat").read_text().rsplit(") ", 1)[1].split()
             if int(fields[3]) == session:
-                usage += int(fields[11]) + int(fields[12])
+                # Linux process CPU clocks include all worker threads, including
+                # exited threads, without /proc/stat's 10ms tick quantization.
+                clock = ctypes.c_int()
+                if LIBC.clock_getcpuclockid(int(entry.name), ctypes.byref(clock)) != 0:
+                    continue  # process exited between enumeration and sampling
+                usage += time.clock_gettime_ns(clock.value) / 1000
                 rss += int(fields[21]) * os.sysconf("SC_PAGE_SIZE")
+                status = (entry / "status").read_text().splitlines()
+                anon += next((int(line.split()[1]) * 1024 for line in status if line.startswith("RssAnon:")), 0)
         except (OSError, ValueError, IndexError):
             pass
-    return {"usage_usec": usage * 1e6 / os.sysconf("SC_CLK_TCK"), "anon_bytes": rss, "memory_bytes": rss}
+    return {"usage_usec": usage, "anon_bytes": anon, "memory_bytes": rss}
 
 
 def kv_file(path):
@@ -246,6 +255,11 @@ def trial(args, mode, profile, load_kind, repetition, ordinal, cert, key, cpus, 
             end_stats = after[role.name]
             delta = {key: end_stats.get(key, 0) - before.get(role.name, {}).get(key, 0) for key in ["usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec"]}
             delta.update({"peak_anon_bytes": role.peak_anon, "peak_memory_bytes": role.peak_memory})
+            if cgroups is None and role.name == "load":
+                # Its process clock disappears after waitpid. Do not represent
+                # missing post-exit CPU accounting as a zero measurement.
+                for key in ["usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec"]:
+                    delta[key] = None
             result["resources"][role.name] = delta
         expected = result["success"]
         if collector:
@@ -300,7 +314,7 @@ def summarize(rows, output):
         flat.append(item)
     keys = sorted(set().union(*(r.keys() for r in flat)))
     with (output / "trials.csv").open("w", newline="") as f:
-        writer = csv.DictWriter(f, keys); writer.writeheader(); writer.writerows(flat)
+        writer = csv.DictWriter(f, keys, lineterminator="\n"); writer.writeheader(); writer.writerows(flat)
     lines = ["# Measured application impact", "", "Initial observations on one shared native Linux runner; medians and ranges are descriptive, not a production capacity guarantee.", "", "| Profile | Load | Mode | RPS median (min–max) | p95 ms median | App CPU µs/request | Extra CPU cores | Capture yield |", "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
     for profile, _, _ in PROFILES:
         for kind in ["fixed", "saturation"]:
@@ -361,11 +375,13 @@ def main():
     if args.require_cgroup and cgroups is None:
         parser.error("writable cgroup v2 CPU/memory accounting required")
     model = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), "unknown")
-    metadata = {"date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kernel": platform.release(), "cpu_model": model, "available_cpus": available, "affinity": cpus, "cpu_isolation": "distinct roles" if len(available) >= 3 else "capture/proxy share application CPU", "accounting": "cgroup-v2" if cgroups else "proc-stat (10ms tick; RSS sum)", "parameters": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}, "source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), "flowscope_revision": "97d9d8e10edd4a5ab2a31cdff7cc674993e354e2", "ecapture_revision": "afcc9345ff8f09f96811a158cf768d284b4c7e1b", "binaries": {}}
+    metadata = {"date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kernel": platform.release(), "cpu_model": model, "available_cpus": available, "affinity": cpus, "cpu_isolation": "distinct roles" if len(available) >= 3 else "capture/proxy share application CPU", "accounting": "cgroup-v2" if cgroups else "process-cpu-clock; summed RssAnon/RSS", "parameters": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}, "source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), "flowscope_revision": "97d9d8e10edd4a5ab2a31cdff7cc674993e354e2", "ecapture_revision": "afcc9345ff8f09f96811a158cf768d284b4c7e1b", "binaries": {}}
     for name in ["app", "helper", "ecapture", "rust", "envoy"]:
         binary = Path(getattr(args, name))
         if binary.is_file():
             metadata["binaries"][name] = hashlib.sha256(binary.read_bytes()).hexdigest()
+    metadata["runner_file_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    metadata["worktree_changes"] = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).splitlines()
     metadata["host_limits"] = {}
     for name in ["cpu.max", "memory.max"]:
         limit = Path("/sys/fs/cgroup") / name

@@ -1,0 +1,72 @@
+{
+  "date_utc": "2026-10-19T01:27:04Z",
+  "kernel": "6.18.55",
+  "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "affinity": {
+    "application": [
+      0
+    ],
+    "load": [
+      1
+    ],
+    "capture": [
+      2,
+      3,
+      4
+    ]
+  },
+  "cpu_isolation": "distinct roles",
+  "accounting": "process-cpu-clock; summed RssAnon/RSS",
+  "parameters": {
+    "output": "/tmp/kapture-overhead-workspace-full",
+    "app": "/tmp/kapture-overhead-app",
+    "helper": "/tmp/kapture-overhead-bench",
+    "ecapture": "/ecapture",
+    "rust": "/rust",
+    "envoy": "/tmp/kapture-overhead-envoy",
+    "modes": "none,envoy,envoy-mirror",
+    "profiles": "small,upload,cpu",
+    "trials": 3,
+    "seconds": 6.0,
+    "warmup": 1.0,
+    "drain": 3,
+    "rate": 100,
+    "concurrency": 16,
+    "require_cgroup": false,
+    "keep_captures": false
+  },
+  "source_sha": "de8e87a888448d0be341ab417919d3d334fcd306",
+  "flowscope_revision": "97d9d8e10edd4a5ab2a31cdff7cc674993e354e2",
+  "ecapture_revision": "afcc9345ff8f09f96811a158cf768d284b4c7e1b",
+  "binaries": {
+    "app": "a81941a35003e0b5497ffae85a08441d59bcd8eab8d3d4d0f9b93d048e20b26e",
+    "helper": "3b0465bc810927de3b7c22673c4c65645ab4eb71d43462f70db3d660afffad2b",
+    "envoy": "afd67bcfea548525ee76a9350a0a4cfeb2ac24c7b532794ce332d840ad8cdae7"
+  },
+  "runner_file_sha256": "2e85e1d004ba64086443c21e83cffac6a4c3f80f94425074e0586de5f13f5af3",
+  "worktree_changes": [
+    " M tools/overhead/run.py",
+    "?? tools/analyze-overhead.py"
+  ],
+  "host_limits": {
+    "cpu.max": "400000 100000",
+    "memory.max": "17179869184"
+  },
+  "versions": {
+    "openssl": "OpenSSL 3.5.7 9 Jun 2026 (Library: OpenSSL 3.5.7 9 Jun 2026)",
+    "envoy": "/tmp/kapture-overhead-envoy  version: dc2d3098ae5641555f15c71d5bb5ce0060a8015c/1.36.2/Clean/RELEASE/BoringSSL"
+  },
+  "postprocessing": {
+    "original_trials_jsonl_sha256": "add8739c9cf8f6151c1d4df6af3db3e2d58c25820fe8594714206e72f7b60334",
+    "normalization": "Exited load-generator CPU-clock fields are unavailable and normalized to null. No application, proxy or collector measurement changed.",
+    "measured_runner_patch": "measured-runner.patch applies to source_sha; reconstructed source matches runner_file_sha256.",
+    "csv_line_endings": "LF (values unchanged)"
+  }
+}

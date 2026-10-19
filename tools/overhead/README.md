@@ -96,3 +96,22 @@ parameters. `trials.jsonl` retains nested CPU/memory and capture counters,
 `trials.csv` is flattened, and `summary.md` is the initial measured table.
 Capture evidence is deleted after each trial unless `--keep-captures` is set.
 Missing prerequisites fail selected native modes; there is no silent fallback.
+
+
+On a host without writable cgroup v2, omitting `--require-cgroup` uses native
+Linux per-process CPU clocks with nanosecond resolution, including worker threads
+and producer children, plus sampled `RssAnon`/RSS sums. It does not estimate CPU
+from coarse `/proc/stat` ticks. Load-generator CPU becomes unavailable after its
+process exits and is recorded as null in this fallback; it is excluded from all
+application/capture totals. Kernel/map memory is not included in RSS. Native CI
+continues to require cgroup v2 for the full comparison.
+
+Summarize a complete recorded experiment (raw JSONL may also be gzip-compressed):
+
+```sh
+python3 tools/analyze-overhead.py /path/to/raw --output /path/to/report --plot
+```
+
+Plot export optionally requires matplotlib. Analysis checks the configured
+experiment matrix and repetition count, retains observed ranges and capture
+fidelity, and pairs each mode with its baseline from the same repetition.

@@ -6,6 +6,7 @@ on:
       - 'tools/overhead/**'
       - 'tools/overhead-bench/**'
       - 'tools/flowscope-bench/src/live.rs'
+      - 'tools/analyze-overhead.py'
       - '.github/workflows/overhead.yaml'
 permissions:
   contents: read
@@ -51,6 +52,10 @@ jobs:
             --ecapture /tmp/kapture-overhead-ecapture \
             --rust "$PWD/tools/flowscope-bench/target/release/kapture-flowscope-live" \
             --envoy /tmp/kapture-overhead-envoy
+      - name: Analyze paired baselines and capture fidelity
+        run: |
+          python3 tools/analyze-overhead.py /tmp/kapture-application-impact \
+            --output /tmp/kapture-application-impact/analysis
       - name: Publish raw measurements even when a fidelity check fails
         if: always()
         uses: actions/upload-artifact@v4
@@ -61,6 +66,8 @@ jobs:
       - name: Show measured table
         if: always()
         run: |
-          if [ -f /tmp/kapture-application-impact/summary.md ]; then
+          if [ -f /tmp/kapture-application-impact/analysis/report.md ]; then
+            cat /tmp/kapture-application-impact/analysis/report.md | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ -f /tmp/kapture-application-impact/summary.md ]; then
             cat /tmp/kapture-application-impact/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
           fi

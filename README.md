@@ -16,7 +16,8 @@ Kapture captures HTTP and gRPC traffic through Gateway API mirroring or an opt-i
 [TLS & Rotation](docs/tls-rotation.md) ·
 [eBPF L7 Capture Proposal](docs/design/ebpf-l7-capture.md) ·
 [eBPF Backend Guide](docs/ebpf-capture.md) ·
-[eCapture / FlowScope Comparison](docs/design/ebpf-l7-capture-comparison.md)
+[eCapture / FlowScope Comparison](docs/design/ebpf-l7-capture-comparison.md) ·
+[Application Overhead Measurements](docs/benchmarks/2026-10-19-application-overhead/README.md)
 
 ### Key Features
 

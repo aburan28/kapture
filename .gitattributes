@@ -1,2 +1,2 @@
 # Unified patch context contains intentional whitespace prefixes.
-patches/*.patch -whitespace
+*.patch -whitespace
