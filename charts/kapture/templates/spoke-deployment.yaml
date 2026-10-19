@@ -24,6 +24,14 @@ spec:
           env:
             - name: AGENT_IMAGE
               value: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+            {{- if .Values.ebpf.enabled }}
+            - name: EBPF_ENABLED
+              value: "true"
+            - name: EBPF_AGENT_IMAGE
+              value: "{{ .Values.ebpf.image.repository }}:{{ .Values.ebpf.image.tag }}"
+            - name: EBPF_SERVICE_ACCOUNT
+              value: {{ .Values.ebpf.serviceAccountName | quote }}
+            {{- end }}
             - name: REPLAY_ENGINE_IMAGE
               value: "{{ .Values.replayEngine.image.repository }}:{{ .Values.replayEngine.image.tag }}"
             {{- if .Values.replayEngine.pluginDir }}

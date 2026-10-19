@@ -78,6 +78,20 @@ func TestFeedServer_NextEndpoint(t *testing.T) {
 	}
 }
 
+func TestFeedServerProjectsLegacyQueryWithoutMutatingSource(t *testing.T) {
+	original := &storage.CapturedRequest{ID: "query", Method: "GET", Path: "/query", Metadata: map[string]string{"query": "a=1&a=2"}}
+	server := newTestFeedServer(t, []*storage.CapturedRequest{original})
+	w := httptest.NewRecorder()
+	server.handleNext(w, httptest.NewRequest("GET", "/next", nil))
+	var got storage.CapturedRequest
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Path != "/query?a=1&a=2" || original.Path != "/query" {
+		t.Fatal("feed server lost query or mutated the source")
+	}
+}
+
 func TestFeedServer_NextEndpoint_ReplayComplete(t *testing.T) {
 	server := newTestFeedServer(t, testRequests(1))
 

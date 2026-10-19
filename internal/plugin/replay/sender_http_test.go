@@ -10,6 +10,28 @@ import (
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
+func TestHTTPSenderPreservesLegacyAndInlineQueries(t *testing.T) {
+	for _, path := range []string{"/query", "/query?a=1&a=2&value=%2F"} {
+		t.Run(path, func(t *testing.T) {
+			got := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got <- r.RequestURI; w.WriteHeader(204) }))
+			defer server.Close()
+			sender, err := NewHTTPSender(HTTPSenderConfig{TargetBaseURL: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sender.Close()
+			r := &storage.CapturedRequest{ID: "query", Method: "GET", Path: path, Metadata: map[string]string{"query": "a=1&a=2&value=%2F"}}
+			if _, err := sender.Send(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			if uri := <-got; uri != "/query?a=1&a=2&value=%2F" || r.Path != path {
+				t.Fatalf("query changed or record mutated: %q", uri)
+			}
+		})
+	}
+}
+
 func TestHTTPSender_BasicSend(t *testing.T) {
 	var received *http.Request
 	var receivedBody []byte

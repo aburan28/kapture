@@ -1,6 +1,8 @@
 # Loom: eBPF L7 Capture — Design Proposal
 
-**Status:** Proposed; no eBPF backend is implemented by this document.
+**Status:** Initial OpenSSL/eCaptureQ backend implemented. See the
+[backend guide](../ebpf-capture.md) for supported behavior and limits. The broader
+packet/secret lineage and shared-node architecture below remain design goals.
 
 **Date:** 2026-10-17
 
@@ -54,12 +56,13 @@ chunking where needed; a wrapper cannot infer missing bytes or exact ordering
 from a full-sized event. A full-sized event alone does not prove that the
 original operation was completely captured.
 
-The implementation boundary should be a pinned collector subprocess or a small
-maintained fork with a versioned event-export interface. eCapture's `internal/`
-packages are not an external Go library API. Its
-[generic protobuf encoder](https://github.com/gojue/ecapture/blob/afcc9345ff8f09f96811a158cf768d284b4c7e1b/internal/output/encoders/protobuf_encoder.go)
-is a placeholder at this revision; do not assume it supplies a ready-made Loom
-ABI. Preserve upstream attribution when reusing source.
+The implemented boundary is a pinned collector subprocess using the existing
+[typed eCaptureQ publisher](https://github.com/gojue/ecapture/blob/afcc9345ff8f09f96811a158cf768d284b4c7e1b/pkg/ecaptureq/server.go)
+and its public v1 wire schema. This publisher is separate from the unused generic
+protobuf encoder. Kapture decodes the required wire fields without importing
+eCapture's private Go packages. Additional lifetime/original-length evidence
+would require upstream work or a maintained extension. Preserve upstream
+attribution when reusing source.
 
 Initially retain eCapture's perf-event transport and report its loss signals.
 Measure before replacing it with BPF ring buffers or changing allocation and

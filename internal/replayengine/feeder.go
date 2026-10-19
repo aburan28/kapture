@@ -254,7 +254,7 @@ func feedItemFromCaptured(req *storage.CapturedRequest, baseTime time.Time) *rep
 		RequestId: req.ID,
 		Protocol:  req.Protocol,
 		Method:    req.Method,
-		Path:      req.Path,
+		Path:      req.RequestURI(),
 		Body:      req.Body,
 		Metadata:  req.Metadata,
 	}

@@ -1,0 +1,33 @@
+suite: eBPF backend enablement
+templates:
+  - spoke-deployment.yaml
+tests:
+  - it: keeps the privileged backend disabled by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: EBPF_ENABLED
+            value: "true"
+  - it: configures the collector image and identity when explicitly enabled
+    set:
+      ebpf.enabled: true
+      ebpf.image.repository: example/collector
+      ebpf.image.tag: pinned
+      ebpf.serviceAccountName: capture-identity
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: EBPF_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: EBPF_AGENT_IMAGE
+            value: example/collector:pinned
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: EBPF_SERVICE_ACCOUNT
+            value: capture-identity

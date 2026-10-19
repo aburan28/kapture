@@ -88,6 +88,7 @@ func BuildReplayJob(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1.
 
 	// Filesystem-backed storage needs the capture volume mounted where the
 	// reader expects it.
+	job.Spec.Template.Spec.Containers[0].Env = append(job.Spec.Template.Spec.Containers[0].Env, httpBackendEnv(storage)...)
 	switch storage.Spec.Type {
 	case capturev1alpha1.CaptureStorageTypeEFS:
 		if storage.Spec.EFS != nil {
@@ -159,6 +160,11 @@ func buildReplayArgs(tr *capturev1alpha1.TrafficReplay, storage *capturev1alpha1
 	}
 
 	switch storage.Spec.Type {
+	case capturev1alpha1.CaptureStorageTypeHTTP:
+		if storage.Spec.HTTP == nil {
+			return nil, fmt.Errorf("HTTP storage has no backend configuration")
+		}
+		args = append(args, "--storage-type", "http", "--backend-url", storage.Spec.HTTP.Endpoint)
 	case capturev1alpha1.CaptureStorageTypeS3:
 		if storage.Spec.S3 == nil {
 			return nil, fmt.Errorf("storage %s has type S3 but no s3 config", storage.Name)

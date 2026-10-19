@@ -9,7 +9,7 @@ Apply `migrations/001_capture_history.sql` to the PostgreSQL database before ena
 The migration creates:
 
 - `captures`: one row per `TrafficCapture`, keyed by the capture ID (`namespace/name`)
-- `capture_artifacts`: one row per uploaded S3 object, keyed by `(capture_id, s3_bucket, s3_key)`
+- `capture_artifacts`: one row per uploaded artifact, keyed by `(capture_id, s3_bucket, s3_key)`. The historical column names remain in place: `s3_key` is the destination's artifact key, and `s3_bucket` is empty for destinations without buckets, such as HTTP adapters backed by a filesystem.
 
 ## Helm Configuration
 

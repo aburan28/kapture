@@ -222,6 +222,10 @@ func NewReaderFromConfig(ctx context.Context, storageType string, config map[str
 		return newGCSReaderFromConfig(ctx, config)
 	case "efs", "ebs":
 		return newFSReaderFromConfig(config)
+	case "http":
+		endpoint, _ := config["endpoint"].(string)
+		token, _ := config["token"].(string)
+		return NewHTTPReader(ctx, HTTPReaderConfig{Endpoint: endpoint, Token: token})
 	default:
 		return nil, fmt.Errorf("unsupported storage type for reading: %q", storageType)
 	}

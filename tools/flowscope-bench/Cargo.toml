@@ -1,0 +1,16 @@
+[package]
+name = "kapture-flowscope-bench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[dependencies]
+flowscope = { git = "https://github.com/p13marc/flowscope", rev = "97d9d8e10edd4a5ab2a31cdff7cc674993e354e2", default-features = false, features = ["http"] }
+
+[profile.release]
+opt-level = 3
+
+[[bin]]
+name = "kapture-flowscope-live"
+path = "src/live.rs"

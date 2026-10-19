@@ -142,6 +142,44 @@ spec:
                 - bucket
                 - credentialsSecretRef
                 type: object
+              http:
+                description: |-
+                  HTTPBackendConfig connects to an independently deployed destination speaking
+                  kapture.backend.v1. Capture and replay negotiate its capabilities at runtime.
+                properties:
+                  endpoint:
+                    maxLength: 2048
+                    minLength: 8
+                    pattern: ^https?://.*
+                    type: string
+                  tokenSecretRef:
+                    description: TokenSecretRef supplies a bearer token from a Secret
+                      in this namespace.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - endpoint
+                type: object
               plugin:
                 description: PluginConfig defines Go plugin storage settings.
                 properties:
@@ -242,6 +280,7 @@ spec:
                 - EFS
                 - EBS
                 - Plugin
+                - HTTP
                 type: string
             required:
             - type
@@ -257,6 +296,8 @@ spec:
               rule: self.type != 'EBS' || has(self.ebs)
             - message: plugin configuration is required when type is Plugin
               rule: self.type != 'Plugin' || has(self.plugin)
+            - message: http configuration is required when type is HTTP
+              rule: self.type != 'HTTP' || has(self.http)
           status:
             description: CaptureStorageStatus defines the observed state of CaptureStorage.
             properties:

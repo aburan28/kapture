@@ -9,6 +9,55 @@ import (
 
 const KindTrafficCapture = "TrafficCapture"
 
+// +kubebuilder:validation:Enum=Mirror;EBPF
+type CaptureBackend string
+
+const (
+	CaptureBackendMirror CaptureBackend = "Mirror"
+	CaptureBackendEBPF   CaptureBackend = "EBPF"
+)
+
+// EBPFCaptureSettings controls a pod-scoped, node-local OpenSSL collector.
+type EBPFCaptureSettings struct {
+	// PID optionally selects one host PID belonging to the target pod.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PID *int32 `json:"pid,omitempty"`
+	// LibraryPath overrides OpenSSL discovery in /proc/PID/maps.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^/.*`
+	LibraryPath string `json:"libraryPath,omitempty"`
+	// +optional
+	// +kubebuilder:default=256
+	// +kubebuilder:validation:Minimum=8
+	// +kubebuilder:validation:Maximum=8192
+	MapPages int32 `json:"mapPages,omitempty"`
+	// +optional
+	// +kubebuilder:default=134217728
+	// +kubebuilder:validation:Minimum=1048576
+	// +kubebuilder:validation:Maximum=2147483648
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
+	// +optional
+	// +kubebuilder:default=33554432
+	// +kubebuilder:validation:Minimum=1048576
+	// +kubebuilder:validation:Maximum=2147483648
+	HistoryBytes int64 `json:"historyBytes,omitempty"`
+	// +optional
+	// +kubebuilder:default="30s"
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`
+	History string `json:"history,omitempty"`
+	// TriggerStatus keeps recent exchanges on the same connection when this
+	// HTTP status is reached; zero exports every exchange. gRPC errors trigger too.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=599
+	TriggerStatus int32 `json:"triggerStatus,omitempty"`
+	// PCAP exports a labeled reconstructed plaintext PCAPNG, never a wire trace.
+	// +optional
+	// +kubebuilder:default=true
+	PCAP *bool `json:"pcap,omitempty"`
+}
+
 // +kubebuilder:validation:Enum=Pending;Active;Completed;Failed
 type TrafficCapturePhase string
 
@@ -103,7 +152,17 @@ type PayloadPluginRef struct {
 }
 
 // TrafficCaptureSpec defines the desired state of TrafficCapture.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.backend) || self.backend != 'EBPF' || (size(self.targetRef.group) == 0 && self.targetRef.kind == 'Pod')",message="EBPF requires a core Pod target in the capture namespace"
+// +kubebuilder:validation:XValidation:rule="!has(self.ebpf) || (has(self.backend) && self.backend == 'EBPF')",message="ebpf settings require the EBPF backend"
+// +kubebuilder:validation:XValidation:rule="!has(self.backend) || self.backend != 'EBPF' || !has(self.agent)",message="EBPF is node-local and does not support agent autoscaling"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.backend) || self.backend == oldSelf.backend",message="capture backend is immutable"
 type TrafficCaptureSpec struct {
+	// +optional
+	// +kubebuilder:default=Mirror
+	Backend CaptureBackend `json:"backend,omitempty"`
+	// +optional
+	EBPF       *EBPFCaptureSettings               `json:"ebpf,omitempty"`
 	TargetRef  gwapiv1.LocalPolicyTargetReference `json:"targetRef"`
 	StorageRef CaptureStorageReference            `json:"storageRef"`
 	Capture    CaptureSettings                    `json:"capture"`

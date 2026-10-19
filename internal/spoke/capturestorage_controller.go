@@ -15,6 +15,7 @@ import (
 
 	capturev1alpha1 "github.com/kapture-io/kapture/api/v1alpha1"
 	"github.com/kapture-io/kapture/internal/storage"
+	"github.com/kapture-io/kapture/pkg/backend"
 )
 
 const storageConditionReady = "Ready"
@@ -74,6 +75,16 @@ func (r *CaptureStorageReconciler) setStatus(ctx context.Context, cs *capturev1a
 
 func validateCaptureStorageSpec(spec capturev1alpha1.CaptureStorageSpec) error {
 	switch spec.Type {
+	case capturev1alpha1.CaptureStorageTypeHTTP:
+		if spec.HTTP == nil {
+			return fmt.Errorf("http backend configuration is required")
+		}
+		if err := backend.ValidateEndpoint(spec.HTTP.Endpoint); err != nil {
+			return err
+		}
+		if ref := spec.HTTP.TokenSecretRef; ref != nil && (strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.Key) == "") {
+			return fmt.Errorf("http tokenSecretRef requires a name and key")
+		}
 	case capturev1alpha1.CaptureStorageTypeS3:
 		if spec.S3 == nil || strings.TrimSpace(spec.S3.Bucket) == "" || strings.TrimSpace(spec.S3.Region) == "" {
 			return fmt.Errorf("s3 configuration is incomplete")

@@ -38,6 +38,16 @@ func NewWriterFactory(storageType string, config any) (WriterFactory, error) {
 			return nil, err
 		}
 		return NewPluginWriterFactory(context.Background(), cfg)
+	case "http":
+		switch cfg := config.(type) {
+		case HTTPConfig:
+			return NewHTTPWriterFactory(context.Background(), cfg)
+		case *HTTPConfig:
+			if cfg != nil {
+				return NewHTTPWriterFactory(context.Background(), *cfg)
+			}
+		}
+		return nil, fmt.Errorf("invalid HTTP backend configuration")
 	default:
 		return nil, fmt.Errorf("unsupported storage type %q", storageType)
 	}

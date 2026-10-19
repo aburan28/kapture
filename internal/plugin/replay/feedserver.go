@@ -3,7 +3,9 @@ package replay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -199,7 +201,7 @@ func (s *FeedServer) readLoop(ctx context.Context) {
 
 		req, err := s.reader.Next(ctx)
 		if err != nil {
-			if err != ErrReaderDone {
+			if !errors.Is(err, ErrReaderDone) && !errors.Is(err, io.EOF) {
 				s.readErr.Store(err)
 			}
 			return
@@ -228,6 +230,11 @@ func (s *FeedServer) readLoop(ctx context.Context) {
 			}
 		}
 		prevTimestamp = req.Timestamp
+		// Present one request-target convention to every load generator while
+		// leaving the original record owned by the reader unchanged.
+		projected := *req
+		projected.Path = req.RequestURI()
+		req = &projected
 
 		select {
 		case <-ctx.Done():

@@ -1,7 +1,11 @@
 # eCapture and FlowScope: L7 Capture Comparison and Measurement Protocol
 
-**Status:** Source comparison and analytical model completed. Live comparative
-performance measurements have not been run; Loom remains a design proposal.
+**Status:** Source comparison and analytical model completed. An initial
+eCaptureQ backend and user-space benchmarks now exist. Native application-impact
+measurements for Envoy request mirroring were added on 2026-10-19; the native
+eBPF/Rust application comparison is queued. See the
+[application-overhead results](../benchmarks/2026-10-19-application-overhead/README.md)
+and [backend guide](../ebpf-capture.md).
 
 **Date:** 2026-10-17
 
@@ -77,8 +81,9 @@ tracing, and hugepage paths checked by the preflight were absent. `ecapture`,
 `clang`, `bpftool`, `tshark`, `tcpdump`, `cargo`, and `rustc` were unavailable.
 
 This prevents a native live eBPF trial and the Rust-library benchmarks in this
-workspace. No DPDK/NIC testbed was established. Loom also has no runnable
-implementation yet. The retention calculation below was executed, but it is
+workspace at the time of the initial design review. No DPDK/NIC testbed was
+established. The subsequent implementation adds a runnable eCaptureQ backend;
+its validation is documented separately. The retention calculation below was executed, but it is
 an analytical scenario, not a capture benchmark.
 
 | Result category | Current evidence |
@@ -86,9 +91,10 @@ an analytical scenario, not a capture benchmark.
 | Architecture and API comparison | Completed against the pinned sources above |
 | Logical retained-byte model | Calculated below with reproducible inputs |
 | eCapture application overhead and capture loss | Not measured here |
+| Envoy application and mirroring overhead | 54 native workspace trials completed; see results linked above |
 | FlowScope capture throughput | Not rerun here |
-| Rust flowscope parser throughput | Not measured here |
-| Loom quality, CPU, memory, or throughput | Not measured; prototype required |
+| Rust flowscope parser throughput | HTTP/1 exchange reconstruction measured below; other protocols not benchmarked |
+| Loom live capture quality, CPU, memory, or throughput | Requires a BPF-capable test host; user-space fixture tests and benchmarks are separate |
 
 Do not populate unrun results with zero or claim a speedup from these rows.
 
@@ -97,6 +103,77 @@ The FlowScope authors
 on their documented multi-NIC, dual-Xeon testbed. This is a published external
 result, not a measurement in this repository or a TLS/L7 decoding benchmark.
 It does not establish a throughput target already met by eBPF or Loom.
+
+## Implemented HTTP/1 parser comparison
+
+The initial implementation was measured on 2026-10-17 against the pinned Rust
+`p13marc/flowscope` revision above. This is **reconstruction only**: identical
+plaintext POST requests with fixed-length bodies and a 204 response, one new
+connection per exchange, with exact exchange counts, request body lengths, and
+response status checked by both harnesses. No BPF, TLS, TCP reassembly, filtering,
+artifact persistence, redaction, or replay delivery is timed.
+
+| Request body | Kapture median µs/exchange (range) | Rust FlowScope median µs/exchange (range) |
+| --- | ---: | ---: |
+| 128 B | 15.61 (13.28–20.26) | 1.16 (1.08–1.29) |
+| 96 KiB | 152.06 (143.18–290.17) | 36.27 (35.23–49.94) |
+
+Each row has five sequential trials, alternating implementation order. Small-body
+trials contain 200,000 exchanges and large-body trials 20,000; every trial
+reconstructed the expected count. The host reports an Intel Xeon Platinum 8573C,
+five visible CPUs, a four-CPU cgroup quota, and 16 GiB memory. Go 1.26.0 uses
+`GOMAXPROCS=1`; Rust 1.97.0 uses the release profile. This is a shared virtual
+workspace, without CPU affinity or a controlled frequency governor. The ranges
+show meaningful scheduling noise; treat these as initial observations.
+
+FlowScope's `HttpExchangeParser` is faster in this workload. The implementations
+also produce different evidence: Kapture constructs observation references,
+source-quality state, identities, and bounded multi-flow state; the Rust harness
+constructs FlowScope's HTTP exchange objects. The test does not isolate the cost
+of those differences, compare HTTP/2 checkpoints, or establish live-capture
+performance. It gives no measured speed advantage to Kapture.
+
+Reproduce with Go 1.26 and Rust 1.97.0 installed:
+
+```bash
+make benchmark-flowscope > comparison.csv
+```
+
+The [harness](../../tools/benchmark-l7.sh) pins FlowScope and its dependency lock
+file. [Raw trials](../benchmarks/2026-10-17-http1.csv) are in execution order,
+with four rows per trial. `make benchmark-l7` additionally measures the Go
+HTTP/2 checkpoint path and allocations; it is not a cross-tool HTTP/2 benchmark.
+
+## Application overhead: native Envoy measurements and queued BPF comparison
+
+The [2026-10-19 results](../benchmarks/2026-10-19-application-overhead/README.md)
+measure application latency/throughput, application CPU, separate proxy/capture
+CPU and anonymous memory. They contain 54 native Linux trials: no capture,
+Envoy without mirroring, and Envoy with 100% request mirroring, across three
+workloads and two load patterns, with three repeats. All 1,608,258 measured
+application requests succeeded, and every measured mirrored request passed its
+unique-ID/body/redaction oracle. Raw rows, exact parameters and a CPU plot are
+included. The workload uses HTTP/1.1 over OpenSSL TLS 1.3, fixed 100 requests/sec
+and a separate 16-worker saturation phase.
+
+At saturation, incremental mirroring reduced median paired throughput by 25.5%
+for 128-byte requests and 45.0% for 8-KiB requests. The CPU-work variant showed no
+clear throughput reduction. Fixed-load extra CPU across the app, proxy and
+capture process was 385, 534 and 687 microseconds/request respectively. These
+are short, shared-host observations with meaningful ranges; see the full report
+before using the medians. They describe one Envoy data plane and local request
+storage, not a measured full service-mesh installation or network object store.
+
+There are no live eBPF-versus-Rust application-overhead numbers in that dataset.
+The workspace kernel lacks BTF. A separate BTF-capable Linux VM validated actual
+BPF capture for SSL BIO, worker-thread `_ex` calls, and persistent Go/Rust/export
+adapters, but software-emulated timing is deliberately excluded. The
+[native workflow](../../.github/workflows/overhead.yaml) runs 126 trials on a
+BPF-capable host: acquisition only, Go reconstruction, Rust reconstruction with
+the same TLS feed and IPC, complete local export, and the three controls above.
+It records capture yield and computes paired baselines automatically. The Rust
+parser receives plaintext from the same eCapture source; a standalone encrypted
+packet feed would not provide equivalent HTTP visibility.
 
 ## Reproducible retained-byte model
 
@@ -140,6 +217,12 @@ increases storage because of the checkpoint. It demonstrates neither CPU savings
 nor a unique advantage over another tool extended with the same retention policy.
 
 ## Benchmark scopes
+
+Kapture's current image applies the documented `kapture-openssl-ex-v3` patch to
+the pinned eCapture source for `_ex` APIs, OpenSSL 3.0 SSL BIO helpers, and
+kernel socket-lifetime/tuple snapshots. An acquisition
+comparison must label that build separately from the unmodified upstream control.
+The parser-only measurements above do not include this probe change.
 
 Measure three scopes separately so acquisition throughput is not mistaken for
 TLS visibility or L7 correctness.
@@ -255,6 +338,6 @@ for the latter. Follow the packet recorder's pinned README and published
 MoonGen testbed for the DPDK acquisition comparison; preserve its NIC/module
 configuration in the result manifest.
 
-Until a runnable eCapture-based prototype and appropriate test host exist, the
+Until comparative runs on an appropriate test host are completed, the
 performance conclusion remains open. The current recommendation rests on code
 reuse and capability fit, not an unmeasured claim that Loom is faster.

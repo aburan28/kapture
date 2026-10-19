@@ -61,7 +61,15 @@ func Launch(ctx context.Context, path string, log *slog.Logger) (*SubprocessEngi
 	}
 
 	cmd := exec.Command(path)
-	cmd.Env = append(os.Environ(),
+	var inherited []string
+	for _, value := range os.Environ() {
+		// Destination authentication belongs to the host-side reader. Load
+		// generators receive the feed and their explicit run configuration.
+		if !strings.HasPrefix(value, "BACKEND_TOKEN=") {
+			inherited = append(inherited, value)
+		}
+	}
+	cmd.Env = append(inherited,
 		sdk.MagicCookieEnv+"="+sdk.MagicCookieValue,
 		sdk.SocketDirEnv+"="+socketDir,
 	)

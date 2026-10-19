@@ -68,7 +68,7 @@ func NewHTTPSender(cfg HTTPSenderConfig) (*HTTPSender, error) {
 }
 
 func (s *HTTPSender) Send(ctx context.Context, req *storage.CapturedRequest) (*Result, error) {
-	url := s.baseURL + req.Path
+	url := s.baseURL + req.RequestURI()
 
 	var body io.Reader
 	if len(req.Body) > 0 {
@@ -145,15 +145,15 @@ var _ Sender = (*HTTPSender)(nil)
 // by proxies or replay engines. Host is also excluded because net/http sets it
 // from the request URL, and Content-Length is best left for net/http to compute.
 var hopByHopHeaders = map[string]bool{
-	"Connection":       true,
-	"Keep-Alive":       true,
-	"Proxy-Connection": true,
+	"Connection":        true,
+	"Keep-Alive":        true,
+	"Proxy-Connection":  true,
 	"Transfer-Encoding": true,
-	"TE":               true,
-	"Trailer":          true,
-	"Upgrade":          true,
-	"Host":             true,
-	"Content-Length":   true,
+	"TE":                true,
+	"Trailer":           true,
+	"Upgrade":           true,
+	"Host":              true,
+	"Content-Length":    true,
 }
 
 func isHopByHopHeader(name string) bool {

@@ -184,6 +184,8 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 	}
 
 	switch storage.Spec.Type {
+	case capturev1alpha1.CaptureStorageTypeHTTP:
+		envs = append(envs, httpBackendEnv(storage)...)
 	case capturev1alpha1.CaptureStorageTypeS3:
 		if storage.Spec.S3 != nil {
 			envs = append(envs,
@@ -262,6 +264,17 @@ func buildEnvVars(tc *capturev1alpha1.TrafficCapture, storage *capturev1alpha1.C
 		}
 	}
 
+	return envs
+}
+
+func httpBackendEnv(storage *capturev1alpha1.CaptureStorage) []corev1.EnvVar {
+	if storage.Spec.Type != capturev1alpha1.CaptureStorageTypeHTTP || storage.Spec.HTTP == nil {
+		return nil
+	}
+	envs := []corev1.EnvVar{{Name: "BACKEND_URL", Value: storage.Spec.HTTP.Endpoint}}
+	if ref := storage.Spec.HTTP.TokenSecretRef; ref != nil {
+		envs = append(envs, corev1.EnvVar{Name: "BACKEND_TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ref.DeepCopy()}})
+	}
 	return envs
 }
 

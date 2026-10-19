@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -248,7 +249,7 @@ func (e *Engine) readLoop(ctx context.Context, out chan<- *storage.CapturedReque
 		}
 
 		req, err := e.reader.Next(ctx)
-		if errors.Is(err, ErrReaderDone) {
+		if errors.Is(err, ErrReaderDone) || errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {

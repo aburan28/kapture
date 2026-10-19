@@ -133,6 +133,16 @@ agent:
     tag: "dev"
     pullPolicy: IfNotPresent
 
+# -- Optional pod-scoped eCapture backend; deploys privileged collectors only
+# for TrafficCaptures explicitly selecting backend: EBPF.
+ebpf:
+  enabled: false
+  image:
+    repository: kapture/ebpf-agent
+    tag: "dev"
+  # -- Existing service account for workload identity, if needed.
+  serviceAccountName: ""
+
 replayEngine:
   image:
     repository: kapture/replay-engine

@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/kapture-io/kapture/internal/agent"
+	"github.com/kapture-io/kapture/internal/ebpf"
 	"github.com/kapture-io/kapture/internal/history"
+	"github.com/kapture-io/kapture/internal/l7"
 	"github.com/kapture-io/kapture/internal/storage"
 )
 
@@ -22,10 +24,21 @@ const historyUpdateTimeout = 5 * time.Second
 
 func main() {
 	var (
+		backend          = flag.String("backend", envOr("CAPTURE_BACKEND", "Mirror"), "Capture backend: Mirror or EBPF")
+		ecaptureBinary   = flag.String("ecapture-binary", envOr("ECAPTURE_BINARY", "/ecapture"), "Pinned eCapture executable")
+		ecapturePID      = flag.Int("ecapture-pid", envIntOr("ECAPTURE_PID", 0), "Optional host PID within the target pod; required outside Kubernetes")
+		ecaptureLibrary  = flag.String("ecapture-library", envOr("ECAPTURE_LIBRARY", ""), "Optional OpenSSL library path; otherwise discover from process maps")
+		ecaptureURL      = flag.String("ecapture-url", "", "Consume an already running typed eCaptureQ endpoint")
+		l7Input          = flag.String("l7-input", "", "Read bounded JSONL observations for offline reconstruction")
+		l7Memory         = flag.Int("l7-memory-bytes", envIntOr("L7_MEMORY_BYTES", 128<<20), "Maximum parser memory budget")
+		l7History        = flag.Duration("l7-history", envDurationOr("L7_HISTORY", 30*time.Second), "Pre-trigger exchange history window")
+		l7HistoryBytes   = flag.Int("l7-history-bytes", envIntOr("L7_HISTORY_BYTES", 32<<20), "Maximum retained exchange history bytes")
+		l7Trigger        = flag.Int("l7-trigger-status", envIntOr("L7_TRIGGER_STATUS", 0), "HTTP status trigger minimum; zero captures every exchange")
+		l7PCAP           = flag.Bool("l7-pcap", envOr("L7_PCAP", "true") == "true", "Export a labeled, reconstructed plaintext PCAPNG per exchange")
 		httpPort         = flag.Int("http-port", 8080, "HTTP sink listen port")
 		grpcPort         = flag.Int("grpc-port", 9090, "gRPC sink listen port")
 		healthPort       = flag.Int("health-port", 8081, "Health/metrics listen port")
-		storageType      = flag.String("storage-type", envOr("STORAGE_TYPE", "efs"), "Storage backend type (s3, gcs, efs, ebs, plugin)")
+		storageType      = flag.String("storage-type", envOr("STORAGE_TYPE", "efs"), "Storage backend type (s3, gcs, efs, ebs, plugin, http)")
 		storageConfig    = flag.String("storage-config", envOr("STORAGE_CONFIG", "{}"), "Storage backend config as JSON")
 		captureID        = flag.String("capture-id", envOr("CAPTURE_ID", ""), "Capture ID for file naming")
 		captureNamespace = flag.String("capture-namespace", envOr("CAPTURE_NAMESPACE", ""), "TrafficCapture namespace for history records")
@@ -34,7 +47,7 @@ func main() {
 		targetName       = flag.String("target-name", envOr("CAPTURE_TARGET_NAME", ""), "Captured Gateway API route name")
 		storageName      = flag.String("storage-name", envOr("CAPTURE_STORAGE_NAME", ""), "CaptureStorage name")
 		databaseURL      = flag.String("database-url", envOr("DATABASE_URL", ""), "PostgreSQL/RDS connection URL for capture history")
-		maxBodyBytes     = flag.Int64("max-body-bytes", 1<<20, "Max request body size in bytes")
+		maxBodyBytes     = flag.Int64("max-body-bytes", int64(envIntOr("CAPTURE_MAX_BODY_BYTES", 1<<20)), "Max request body size in bytes")
 		batchSize        = flag.Int("batch-size", 100, "Buffered writer batch size")
 		flushInterval    = flag.Duration("flush-interval", 5*time.Second, "Buffered writer flush interval")
 		filterPathPrefix = flag.String("filter-path-prefix", envOr("FILTER_PATH_PREFIX", ""), "Only capture requests whose path starts with this prefix")
@@ -45,6 +58,14 @@ func main() {
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if *backend != "Mirror" && *backend != "EBPF" {
+		log.Error("backend must be Mirror or EBPF")
+		os.Exit(1)
+	}
+	if *backend == "EBPF" && (*maxBodyBytes < 0 || *maxBodyBytes > 64<<20 || *l7Memory < 1<<20 || *l7HistoryBytes < 1<<20 || *l7Trigger < 0 || *l7Trigger > 599 || *l7History < 0) {
+		log.Error("invalid capture size, trigger or retention limit")
+		os.Exit(1)
+	}
 
 	if *captureID == "" {
 		log.Error("--capture-id or CAPTURE_ID is required")
@@ -169,7 +190,17 @@ func main() {
 		"historyEnabled", historyRepo != nil,
 	)
 
-	serverErr := server.Start(ctx)
+	var serverErr error
+	if *backend == "EBPF" {
+		artifacts, ok := factory.(storage.ArtifactWriter)
+		if !ok {
+			serverErr = fmt.Errorf("storage backend does not support L7 evidence artifacts")
+		} else {
+			serverErr = ebpf.Run(ctx, ebpf.Config{CaptureID: *captureID, Binary: *ecaptureBinary, PID: *ecapturePID, Library: *ecaptureLibrary, PodUID: os.Getenv("TARGET_POD_UID"), MapPages: envIntOr("ECAPTURE_MAP_PAGES", 256), SourceURL: *ecaptureURL, InputFile: *l7Input, HealthAddress: fmt.Sprintf(":%d", *healthPort), Engine: l7.Config{MaxBodyBytes: max(1, int(*maxBodyBytes)), MaxMemoryBytes: *l7Memory}, Export: l7.ExportConfig{CaptureID: *captureID, Writer: bufferedWriter, Artifacts: artifacts, Filter: requestFilter, RedactHeaders: l7.RedactionList(os.Getenv("CAPTURE_REDACT_HEADERS")), IncludeHeaders: envOr("CAPTURE_INCLUDE_HEADERS", "true") == "true", IncludeBody: *maxBodyBytes > 0 && envOr("CAPTURE_INCLUDE_BODY", "true") == "true", PCAP: *l7PCAP, History: *l7History, HistoryBytes: *l7HistoryBytes, TriggerStatus: *l7Trigger}})
+		}
+	} else {
+		serverErr = server.Start(ctx)
+	}
 	if serverErr != nil {
 		log.Error("server exited with error", "error", serverErr)
 	}
@@ -218,6 +249,14 @@ func main() {
 
 func parseStorageConfig(storageType, rawJSON string) (any, error) {
 	switch strings.ToLower(strings.TrimSpace(storageType)) {
+	case "http":
+		var cfg storage.HTTPConfig
+		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("parse HTTP backend config: %w", err)
+		}
+		cfg.Endpoint = firstNonEmpty(cfg.Endpoint, os.Getenv("BACKEND_URL"))
+		cfg.Token = os.Getenv("BACKEND_TOKEN")
+		return cfg, nil
 	case "s3":
 		var cfg storage.S3Config
 		if err := unmarshalOptionalConfig(rawJSON, &cfg); err != nil {
@@ -275,6 +314,11 @@ func unmarshalOptionalConfig(rawJSON string, target any) error {
 
 func attachHistoryRecorder(config any, recorder storage.ArtifactRecorder, namespace, name string) any {
 	switch cfg := config.(type) {
+	case storage.HTTPConfig:
+		cfg.ArtifactRecorder = recorder
+		cfg.CaptureNamespace = namespace
+		cfg.CaptureName = name
+		return cfg
 	case storage.S3Config:
 		cfg.ArtifactRecorder = recorder
 		cfg.CaptureNamespace = namespace
@@ -331,6 +375,18 @@ func envIntOr(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func envDurationOr(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return -1
+	}
+	return d
 }
 
 func firstNonEmpty(values ...string) string {

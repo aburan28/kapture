@@ -30,6 +30,16 @@ build-engines:
 	go build -o bin/kapture-preshard ./cmd/kapture-preshard
 	go build -o bin/plugin-installer ./cmd/plugin-installer
 
+.PHONY: docker-build-ebpf benchmark-l7 benchmark-flowscope
+docker-build-ebpf:
+	docker build -f Dockerfile.ebpf -t kapture/ebpf-agent:dev .
+
+benchmark-l7:
+	go test ./internal/l7 -run '^$$' -bench . -benchmem -count=5
+
+benchmark-flowscope:
+	@bash tools/benchmark-l7.sh
+
 test:
 	go test ./...
 

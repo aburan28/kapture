@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kapture-io/kapture/pkg/capture"
 )
 
 const (
@@ -38,17 +40,7 @@ type ManifestWriter interface {
 	PutManifest(ctx context.Context, captureID string, data []byte) error
 }
 
-type CapturedRequest struct {
-	ID            string              `json:"id"`
-	Timestamp     time.Time           `json:"timestamp"`
-	Method        string              `json:"method"`
-	Path          string              `json:"path"`
-	Headers       map[string][]string `json:"headers,omitempty"`
-	Body          []byte              `json:"body,omitempty"`
-	ContentLength int64               `json:"contentLength,omitempty"`
-	Protocol      string              `json:"protocol"`
-	Metadata      map[string]string   `json:"metadata,omitempty"`
-}
+type CapturedRequest = capture.Request
 
 type Writer interface {
 	Write(ctx context.Context, req *CapturedRequest) error
@@ -62,20 +54,7 @@ type WriterFactory interface {
 
 type Config interface{ isStorageConfig() }
 
-type ArtifactRecord struct {
-	CaptureID        string
-	CaptureNamespace string
-	CaptureName      string
-	StorageBackend   string
-	Bucket           string
-	Key              string
-	Region           string
-	ContentType      string
-	ContentEncoding  string
-	SizeBytes        int64
-	SHA256           string
-	CreatedAt        time.Time
-}
+type ArtifactRecord = capture.Artifact
 
 type ArtifactRecorder interface {
 	RecordArtifact(ctx context.Context, artifact ArtifactRecord) error
