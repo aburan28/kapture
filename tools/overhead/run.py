@@ -253,7 +253,7 @@ def trial(args, mode, profile, load_kind, repetition, ordinal, cert, key, cpus, 
         result["resources"] = {}
         for role in roles:
             end_stats = after[role.name]
-            delta = {key: end_stats.get(key, 0) - before.get(role.name, {}).get(key, 0) for key in ["usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec"]}
+            delta = {key: end_stats[key] - before.get(role.name, {}).get(key, 0) if key in end_stats else None for key in ["usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec"]}
             delta.update({"peak_anon_bytes": role.peak_anon, "peak_memory_bytes": role.peak_memory})
             if cgroups is None and role.name == "load":
                 # Its process clock disappears after waitpid. Do not represent

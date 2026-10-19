@@ -65,7 +65,7 @@
   },
   "postprocessing": {
     "original_trials_jsonl_sha256": "add8739c9cf8f6151c1d4df6af3db3e2d58c25820fe8594714206e72f7b60334",
-    "normalization": "Exited load-generator CPU-clock fields are unavailable and normalized to null. No application, proxy or collector measurement changed.",
+    "normalization": "Exited load-generator CPU and uncollected user/system CPU/throttling breakdowns are normalized to null. No measured application, proxy or collector total CPU, memory, latency or capture metric changed.",
     "measured_runner_patch": "measured-runner.patch applies to source_sha; reconstructed source matches runner_file_sha256.",
     "csv_line_endings": "LF (values unchanged)"
   }

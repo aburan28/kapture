@@ -102,7 +102,8 @@ On a host without writable cgroup v2, omitting `--require-cgroup` uses native
 Linux per-process CPU clocks with nanosecond resolution, including worker threads
 and producer children, plus sampled `RssAnon`/RSS sums. It does not estimate CPU
 from coarse `/proc/stat` ticks. Load-generator CPU becomes unavailable after its
-process exits and is recorded as null in this fallback; it is excluded from all
+process exits and is recorded as null in this fallback, as are uncollected
+user/system CPU and throttling breakdowns. Load CPU is excluded from all
 application/capture totals. Kernel/map memory is not included in RSS. Native CI
 continues to require cgroup v2 for the full comparison.
 

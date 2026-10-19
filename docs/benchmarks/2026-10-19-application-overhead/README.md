@@ -56,7 +56,8 @@ the supplied runner patch. Reconstructed source was checked against the recorded
 CPU uses Linux process CPU clocks with nanosecond resolution, including exited
 worker threads and producer children; memory is sampled `RssAnon`/RSS. The
 load-generator clock becomes unavailable after exit: those fields are normalized
-to null and excluded from all app/capture totals. Metadata records this exact
+to null and excluded from all app/capture totals. Uncollected user/system CPU
+and throttling breakdowns are also null. Metadata records this exact
 normalization and the original raw-file checksum. Application, proxy and
 collector measurements are unmodified. Fixture keys and capture payload files
 were removed after measurement.
