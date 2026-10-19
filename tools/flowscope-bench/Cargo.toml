@@ -10,3 +10,7 @@ flowscope = { git = "https://github.com/p13marc/flowscope", rev = "97d9d8e10edd4
 
 [profile.release]
 opt-level = 3
+
+[[bin]]
+name = "kapture-flowscope-live"
+path = "src/live.rs"

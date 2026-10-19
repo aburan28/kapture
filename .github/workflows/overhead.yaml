@@ -1,0 +1,66 @@
+name: Application Capture Overhead
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/overhead/**'
+      - 'tools/overhead-bench/**'
+      - 'tools/flowscope-bench/src/live.rs'
+      - '.github/workflows/overhead.yaml'
+permissions:
+  contents: read
+concurrency:
+  group: capture-overhead-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-impact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - name: Build exact capture producer and benchmark components
+        run: |
+          docker build -f Dockerfile.ebpf -t kapture/ebpf-agent:overhead .
+          producer=$(docker create kapture/ebpf-agent:overhead)
+          docker cp "$producer:/ecapture" /tmp/kapture-overhead-ecapture
+          docker rm "$producer"
+          CGO_ENABLED=0 go build -o /tmp/kapture-overhead-bench ./tools/overhead-bench
+          cc -O2 -Wall -Wextra -Werror -pthread tools/overhead/openssl-app.c -lssl -lcrypto -o /tmp/kapture-overhead-app
+          cargo build --release --locked --manifest-path tools/flowscope-bench/Cargo.toml
+      - name: Fetch pinned Envoy data plane
+        run: |
+          docker pull envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
+          proxy=$(docker create envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba)
+          docker cp "$proxy:/usr/local/bin/envoy" /tmp/kapture-overhead-envoy
+          docker rm "$proxy"
+          /tmp/kapture-overhead-envoy --version
+      - name: Check benchmark correctness oracles
+        run: |
+          go test ./tools/overhead-bench -race
+          python3 tools/overhead/check.py tools/flowscope-bench/target/release/kapture-flowscope-live
+      - name: Measure application impact on the native kernel
+        run: |
+          sudo python3 tools/overhead/run.py \
+            --require-cgroup --output /tmp/kapture-application-impact \
+            --app /tmp/kapture-overhead-app \
+            --helper /tmp/kapture-overhead-bench \
+            --ecapture /tmp/kapture-overhead-ecapture \
+            --rust "$PWD/tools/flowscope-bench/target/release/kapture-flowscope-live" \
+            --envoy /tmp/kapture-overhead-envoy
+      - name: Publish raw measurements even when a fidelity check fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-impact-${{ github.sha }}
+          path: /tmp/kapture-application-impact
+          if-no-files-found: warn
+      - name: Show measured table
+        if: always()
+        run: |
+          if [ -f /tmp/kapture-application-impact/summary.md ]; then
+            cat /tmp/kapture-application-impact/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
