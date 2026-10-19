@@ -219,7 +219,7 @@ func (w *oracleWriter) Write(ctx context.Context, r *storage.CapturedRequest) er
 		return err
 	}
 	h := http.Header(r.Headers)
-	w.stats.observe(h.Get("X-Bench-Id"), h.Get("X-Bench-Phase"), r.Method == "POST" && r.Path == "/bench" && len(r.Body) == w.size && bytes.Equal(r.Body, bytes.Repeat([]byte("x"), w.size)) && h.Get("Authorization") == "[REDACTED]")
+	w.stats.observe(h.Get("X-Bench-Id"), h.Get("X-Bench-Phase"), r.Method == "POST" && r.Path == "/bench" && len(r.Body) == w.size && validBody(r.Body, w.size) && h.Get("Authorization") == "[REDACTED]")
 	return nil
 }
 
@@ -311,7 +311,7 @@ func collect(args []string) error {
 		want := sha256.Sum256(bytes.Repeat([]byte("x"), *size))
 		digest := hex.EncodeToString(want[:])
 		engine = l7.NewEngine(l7.Config{}, func(x *l7.Exchange) error {
-			s.observe(x.Request.Headers.Get("X-Bench-Id"), x.Request.Headers.Get("X-Bench-Phase"), x.Request.Complete && x.Response.Complete && x.Response.Status == 204 && x.Request.Method == "POST" && x.Request.Path == "/bench" && len(x.Request.Body) == *size && bytes.Equal(x.Request.Body, bytes.Repeat([]byte("x"), *size)) && x.Response.Headers.Get("X-Bench-Id") == x.Request.Headers.Get("X-Bench-Id") && x.Response.Headers.Get("X-Bench-SHA256") == digest && len(x.Quality.Reasons) == 0)
+			s.observe(x.Request.Headers.Get("X-Bench-Id"), x.Request.Headers.Get("X-Bench-Phase"), x.Request.Complete && x.Response.Complete && x.Response.Status == 204 && x.Request.Method == "POST" && x.Request.Path == "/bench" && len(x.Request.Body) == *size && validBody(x.Request.Body, *size) && x.Response.Headers.Get("X-Bench-Id") == x.Request.Headers.Get("X-Bench-Id") && x.Response.Headers.Get("X-Bench-SHA256") == digest && len(x.Quality.Reasons) == 0)
 			return nil
 		})
 	}
@@ -418,3 +418,17 @@ func collect(args []string) error {
 }
 
 func binaryLittle(b []byte) uint64 { return binary.LittleEndian.Uint64(b) }
+
+// The correctness oracle must scan the body without allocating an expected
+// buffer per exchange; that would bias the Go/Rust application comparison.
+func validBody(body []byte, size int) bool {
+	if len(body) != size {
+		return false
+	}
+	for _, value := range body {
+		if value != 'x' {
+			return false
+		}
+	}
+	return true
+}
